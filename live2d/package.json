@@ -1,0 +1,6 @@
+{
+  "name": "local-file-chat-live2d-prototype",
+  "private": true,
+  "scripts": {"build": "node build.mjs"},
+  "devDependencies": {"esbuild": "0.25.12"}
+}

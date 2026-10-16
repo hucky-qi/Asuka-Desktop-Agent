@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "enabled": false,
+  "query_limit": 0,
+  "call_limit": 0,
+  "model_endpoint": null,
+  "note": "No real model validation authorized in this turn. Historical budgets remain closed."
+}

@@ -1,0 +1,27 @@
+{
+  "mode": "offline",
+  "real_queries": 0,
+  "real_model_calls": 0,
+  "cases": [
+    "mock receiver only",
+    "unavailable mock fails without fallback",
+    "wrong mock address rejected",
+    "unknown interface rejected",
+    "declared mock API returning 501 fails once without fallback",
+    "redirect does not reach second receiver",
+    "DNS resolver escape blocked using numeric loopback fixture only",
+    "ordinary or nested client escape blocked before send",
+    "missing guard configuration stops startup",
+    "zero query budget sends nothing",
+    "zero call budget sends nothing",
+    "unbudgeted or finished query rejected",
+    "query limit independent of call limit",
+    "call limit independent of query limit",
+    "failed model attempt counted once without retry",
+    "concurrent last query reservation",
+    "concurrent last call reservation",
+    "restart preserves budget",
+    "disabled real policy rejects startup"
+  ],
+  "fixtures": "Only ephemeral loopback HTTP receivers and synthetic nonzero ledgers; never real Ollama/embedding/Baidu/calendar."
+}

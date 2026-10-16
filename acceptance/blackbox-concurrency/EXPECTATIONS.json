@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "frozen_before_baseline": true,
+  "basis": "User product requirements and observed public UI, not server implementation",
+  "cases": [
+    {"id":"startup", "expect":"Existing desktop entry remains usable; second launch leaves one character; no index update or external search"},
+    {"id":"ime", "expect":"Composition Enter/Space/digit and input/change/blur issue zero submissions; explicit send issues exactly one; Shift+Enter preserves newline; synthetic coverage is not native IME"},
+    {"id":"chat_memory", "expect":"A session recalls a supplied test nickname and follows up on RAG; another session cannot recall that nickname"},
+    {"id":"reset", "expect":"Reset clears only the selected conversation; late data cannot restore it"},
+    {"id":"draft_hide", "expect":"Hiding and reopening preserves draft and completed answer"},
+    {"id":"panel", "expect":"While busy answer panel is hidden; status closes before full answer autoopens; right menu stop available"},
+    {"id":"file_sync", "expect":"Natural language and advanced filters retain the same current results/context; displayed, validated and candidate counts are distinguishable"},
+    {"id":"constraints", "expect":"Type, explicit folder and complete identifier are hard constraints; daily files and no-match queries do not require course-specific rules"},
+    {"id":"followup", "expect":"Only PDF then modification sort reuse current result context; selection remains bound to the correct file identity"},
+    {"id":"cancel_clear", "expect":"Only target task stops; old completion cannot write back; other tasks remain active and complete normally"},
+    {"id":"clock", "expect":"Date/time/timezone reflect actual host, without external search"},
+    {"id":"calendar", "expect":"Today/tomorrow range is local timezone; real query is read-only; denial/empty/failure are distinguished in isolated scenarios; no private text logs"},
+    {"id":"web", "expect":"Default off; toggle alone issues zero search; daily eligibility is separate from exhausted developer lock; shared persistent rolling30, failure counts, cache and pre-send blocks do not count"},
+    {"id":"concurrent_chat_files", "expect":"Independent local chat and filename search retain answer ownership, aggregate busy state and file identity"},
+    {"id":"concurrent_chat_semantic", "expect":"Chat plus real semantic search can queue; real embedding used, no false completion, no cross-history"},
+    {"id":"concurrent_cancel_reset", "expect":"Cancel/reset one session does not cancel another, clear its state, or reopen stale answers"}
+  ],
+  "thresholds": {"simple_cards_target_seconds":5,"complex_cards_target_seconds":15,"threshold_miss_is_recorded_not_silently_relaxed":true},
+  "safety": {"real_baidu_requests":0,"no_formal_state_mutation":true,"no_system_time_or_permission_changes":true},
+  "prior_manual_confirmation": {"native_ime":"User reports no accidental sends", "native_drag":"User reports no drag/boundary problems", "calendar_final_entry":"User confirms final entry authorized, clock and calendar work"},
+  "known_issues_preserved": ["成绩 ranking", "complex-query latency"],
+  "coverage_rule":"Unavailable native automation is uncovered, never an automatic pass; external dependencies may be isolated HTTP simulators, not internal final-state injection"
+}

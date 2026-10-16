@@ -1,0 +1,30 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Live2D 本机显示原型</title>
+<style>
+html,body{margin:0;height:100%;font-family:-apple-system,sans-serif;color:#17469f;background:transparent;overflow:hidden}
+#stage{position:absolute;inset:80px 0 150px;display:grid;place-items:center;background:repeating-conic-gradient(#e8eef8 0% 25%,#f9fbff 0% 50%) 0/24px 24px}
+canvas{width:100%;height:100%;display:block;position:absolute;inset:0}#staticBody,#footShadow{pointer-events:none}#footShadow{z-index:0}#model{z-index:1}header,footer{position:absolute;padding:10px 16px;left:0;right:0;background:#edf4ff}header{top:0}footer{bottom:0;display:flex;gap:12px;align-items:center}
+#label{font-weight:600}#status{font-size:12px;white-space:pre-line}button{border:0;background:#2458be;color:white;border-radius:8px;padding:8px;cursor:pointer}input{width:120px}
+body.pet #stage{inset:32px 0 0 50px;background:transparent}body.pet header,body.pet footer{display:none}footer{flex-wrap:wrap}select{max-width:120px}
+#searchBubble{position:absolute;left:16px;top:28px;width:76px;height:44px;z-index:4;pointer-events:none;transform-origin:72px 40px}
+#searchBubble[hidden]{display:none}#searchBubble svg{width:76px;height:44px;overflow:visible;pointer-events:none}
+#searchBubble .dots,#searchBubble .wifi{opacity:0;transition:opacity 180ms ease;pointer-events:none}
+#searchBubble[data-mode="dots"] .dots,#searchBubble[data-mode="wifi"] .wifi{opacity:1}
+#searchBubble .dots circle{animation:search-dot 1.2s ease-in-out infinite}#searchBubble .dots circle:nth-of-type(2){animation-delay:.15s}#searchBubble .dots circle:nth-of-type(3){animation-delay:.3s}
+#searchBubble .wifi path{opacity:.18;animation-duration:1.4s;animation-timing-function:steps(1,end);animation-iteration-count:infinite}
+#searchBubble .wifi path:nth-of-type(1){animation-name:wifi-near}#searchBubble .wifi path:nth-of-type(2){animation-name:wifi-middle}#searchBubble .wifi path:nth-of-type(3){animation-name:wifi-far}
+@keyframes wifi-near{0%,87%,100%{opacity:.18}8%,86%{opacity:1}}
+@keyframes wifi-middle{0%,87%,100%{opacity:.18}34%,86%{opacity:1}}
+@keyframes wifi-far{0%,87%,100%{opacity:.18}60%,86%{opacity:1}}
+@keyframes search-dot{0%,65%,100%{transform:translateY(0)}30%{transform:translateY(-3px)}}
+@media(prefers-reduced-motion:reduce){#searchBubble .dots,#searchBubble .wifi{transition:none}#searchBubble .dots circle,#searchBubble .wifi path{animation:none;opacity:1}}
+#recordReview{display:none}.review #stage{width:154px;height:192px;inset:32px auto auto 50px}.review #recordReview{display:block;position:absolute;left:4px;top:242px}
+</style></head><body>
+<header><div id="label">载入官方示例…</div><div id="status" role="status">初始化 WebGL2</div></header>
+<div id="searchBubble" aria-label="正在查找" hidden><svg viewBox="0 0 76 44" aria-hidden="true"><path class="wait-outline" d="M12 2 H56 Q64 2 64 10 V22 Q64 28 59 29 L72 40 L52 30 H12 Q4 30 4 22 V10 Q4 2 12 2 Z" fill="#fffdf9" stroke="#111" stroke-width="1.5" stroke-linejoin="round"/><g class="dots"><circle cx="20" cy="16" r="2" fill="#111"/><circle cx="31" cy="16" r="2" fill="#111"/><circle cx="42" cy="16" r="2" fill="#111"/></g><g class="wifi" fill="none" stroke="#111" stroke-width="2" stroke-linecap="round"><path d="M28 21 Q32 17 36 21"/><path d="M24 17 Q32 10 40 17"/><path d="M20 13 Q32 3 44 13"/></g></svg></div><button id="recordReview" disabled>录制待机/检索/完成/取消验收</button>
+<div id="stage"><canvas id="footShadow" aria-hidden="true"></canvas><canvas id="model" aria-label="Live2D 模型显示"></canvas></div>
+<footer><label>缩放 <input id="scale" aria-label="缩放" type="range" min="0.5" max="1.6" step="0.05" value="1"></label><button id="motion" disabled>测试动作</button><button id="pause" disabled>暂停</button><label>状态验收 <select id="assistantState"><option value="idle">待机</option><option value="searching">搜索中</option><option value="complete">回答完成</option></select></label></footer>
+<footer style="bottom:45px" class="blinkReview"><label>眼睛验收 <select id="eyeSide"><option value="both">双眼</option><option value="left">左眼</option><option value="right">右眼</option></select></label><input id="eyeOpen" aria-label="眼睛开合验收" type="range" min="0" max="1" step="0.25" value="1"><output id="eyeValue">自动</output><button id="autoBlink">自动眨眼</button></footer>
+<footer style="bottom:90px"><label>头部倾斜 <input id="headAngle" aria-label="头部倾斜验收" type="range" min="-3" max="3" step="1" value="0"></label><label>呼吸 <input id="breathValue" aria-label="呼吸验收" type="range" min="0" max="1" step="0.5" value="0"></label><label>发束 <input id="hairValue" aria-label="发束摆动验收" type="range" min="-1" max="1" step="0.5" value="0"></label><button id="autoPose">自动待机</button><button id="capturePose" disabled>记录当前姿态</button></footer>
+<script src="./live2dcubismcore.min.js"></script><script src="./prototype.js"></script>
+</body></html>

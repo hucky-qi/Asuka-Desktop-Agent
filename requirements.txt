@@ -1,0 +1,6 @@
+ollama
+pypdf
+python-docx
+Send2Trash>=2.1,<3
+
+certifi
