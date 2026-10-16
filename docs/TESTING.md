@@ -38,3 +38,13 @@
 发布源码、暂存区和全部提交使用Gitleaks及定向检查；另在本机内存中比较已知凭据，报告只给结论，不输出原值。扫描未发现不代表绝对无泄漏。未发布私人报告、截图、正式数据或第三方SDK/角色资产。`tools/verify_release.py`可重跑无Key隔离启动；`--native-smoke`须先自行编译`.desktop_pet`，只验证独立无模型窗口就绪，结束后退出该测试窗口，不替换原桌面入口。
 
 桌面启动/构建安全单测7项通过；.app在发布副本独立目录生成并签名验证，未替换用户桌面入口。首发没有运行付费API、真实模型、embedding或私人日历写入。
+
+## Asuka运行资源追加验证（2026-10-16）
+
+默认`run_tests.py`现先执行`tools/verify_live2d.py`：校验model3全部引用、manifest哈希、路径边界、MOC3文件头、PNG CRC/尺寸/无文字或EXIF元数据，以及实际0.88/1.6配置。单独命令`.venv/bin/python tools/verify_live2d.py`不依赖SDK或模型服务。
+
+在原发布副本中从本机官方Web 5-r.5 SDK执行`prepare.py --asuka`、`npm ci`、`npm run build`通过；SDK仅进入忽略目录。浏览器实际WebGL渲染ready=true、physics=true、mocVersion=latestMoc=6、staticBody=false、fallback=false、无error/warning，模型/纹理/物理均来自本次引用图。无模型蓝色原生就绪及无Key网页/人工文件搜索复验通过。独立原生WKWebView加载配合隔离HTTP后端验证，不冒充原桌面入口双击、聊天/停止/边缘拖动或用户实际操作验收。浏览器诊断与截图留本机，不上传私人桌面图。
+
+本轮AI模型、embedding、百度和私人日历请求/写入0；未重启原助手。SDK应用出版许可适用性、角色GitHub模型包适用范围及基础AI图完整来源仍未确认，不以渲染通过证明许可。Windows、其他SDK版本及干净机器首次系统权限仍未验收。
+
+本次将待提交Git tree导出到无Git历史、无SDK/缓存的干净目录，再准备本机SDK、npm安装与build；该目录浏览器再次ready/physics为true、无错误，0.88比例正确。独立原生WKWebView及alpha命中遮罩ready通过（后端为隔离模拟，无AI请求）；没有把它写成原入口双击和鼠标交互验收。资源校验＋安全隔离19项＋HTTP11组通过，保持各层统计独立。全部待提交文件及元数据扫描未发现已知凭据或私人路径；没有扫描能保证绝对无泄漏。

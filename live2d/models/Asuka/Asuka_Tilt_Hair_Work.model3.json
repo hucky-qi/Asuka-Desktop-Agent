@@ -1,0 +1,11 @@
+{
+  "Version": 3,
+  "FileReferences": {
+    "Moc": "Asuka_Tilt_Hair_Work.moc3",
+    "Textures": [
+      "Asuka_Tilt_Hair_Work.1024/texture_00.png"
+    ],
+    "DisplayInfo": "Asuka_Tilt_Hair_Work.cdi3.json",
+    "Physics": "Asuka_Idle_Tails.physics3.json"
+  }
+}

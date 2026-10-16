@@ -62,7 +62,9 @@ def copy_model(source, destination):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--sdk', type=Path, required=True)
-    parser.add_argument('--model', type=Path, required=True, help='已获授权的 model3.json')
+    choice=parser.add_mutually_exclusive_group(required=True)
+    choice.add_argument('--model', type=Path, help='用户自行确认权利的 model3.json')
+    choice.add_argument('--asuka', action='store_true', help='使用随项目附带的非官方同人v7；先阅读models/Asuka/NOTICE.md')
     args = parser.parse_args()
     sdk = args.sdk.resolve()
     private = ROOT/'.sdk'
@@ -77,13 +79,17 @@ def main():
     for component in ('Core', 'Framework'):
         for path in (sdk/component).glob('*LICENSE*'):
             shutil.copy2(path, private/f'{component}-{path.name}')
-    source = args.model
-    folder = 'Custom'
+    source = ROOT/'models/Asuka/Asuka_Tilt_Hair_Work.model3.json' if args.asuka else args.model
+    folder = 'Asuka' if args.asuka else 'Custom'
     name = copy_model(source, public/'models'/folder)
     config = {'model': f'./models/{folder}/{name}', 'sample': False,
               'label': 'User supplied model', 'sdk': 'Cubism SDK for Web', 'fallbackModel': None}
+    if args.asuka:
+        config=json.loads((ROOT/'asuka-model-config.json').read_text())
+        config['model']=f'./models/Asuka/{name}'
+        config['fallbackModel']=None
     (public/'model-config.json').write_text(json.dumps(config, ensure_ascii=False, indent=2))
-    print('已准备最小本机资源；SDK/Core/模型保持 Git 忽略。', config['label'])
+    print('已准备本机资源；SDK/Core/构建产物保持Git忽略，未下载第三方资源。', config['label'])
 
 
 if __name__ == '__main__':

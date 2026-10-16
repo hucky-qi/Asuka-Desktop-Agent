@@ -36,3 +36,17 @@ acceptance/**/offline-*/
 acceptance/**/current-*.json
 acceptance/test-safety/real-budget*
 release-checks/
+
+# Reviewed v7 runtime allowlist only. Keep all other model/editor assets private.
+/live2d/models/*
+!/live2d/models/Asuka/
+/live2d/models/Asuka/*
+!/live2d/models/Asuka/Asuka_Tilt_Hair_Work.model3.json
+!/live2d/models/Asuka/Asuka_Tilt_Hair_Work.moc3
+!/live2d/models/Asuka/Asuka_Tilt_Hair_Work.cdi3.json
+!/live2d/models/Asuka/Asuka_Idle_Tails.physics3.json
+!/live2d/models/Asuka/manifest.json
+!/live2d/models/Asuka/NOTICE.md
+!/live2d/models/Asuka/Asuka_Tilt_Hair_Work.1024/
+/live2d/models/Asuka/Asuka_Tilt_Hair_Work.1024/*
+!/live2d/models/Asuka/Asuka_Tilt_Hair_Work.1024/texture_00.png

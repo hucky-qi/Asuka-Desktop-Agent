@@ -6,7 +6,9 @@
 
 ## 不包含的第三方与角色资产
 
-不包含Live2D Cubism Core、Framework、SDK样例、Wanko及其他官方模型；不包含明日香的纹理、moc3、cmo3、编辑源、参考图或图标。仅有自写接入/构建代码。请从[官方SDK下载](https://www.live2d.com/en/sdk/download/web/)获取，并逐项阅读[官方授权说明](https://www.live2d.com/en/sdk/license/)及下载包实际条款；SDK、Core、Framework、示例与个人模型的再分发条件可能不同。本项目不授予角色/原作权利，不提供角色资源外链或自动下载。
+现在包含Asuka v7最小运行资源（model3/moc3/纹理/DisplayInfo/physics3），属于**AI生成/辅助的非官方同人素材**；制作来源、未确认的参考/角色权利及许可适用范围单独见[素材NOTICE](live2d/models/Asuka/NOTICE.md)。不是官方授权素材，不给予第三方角色权利或通用商用/再分发许可，不以代码许可证覆盖素材。
+
+仍不包含Cubism Core、Framework、shader、SDK示例/Wanko、角色源工程/参考图/图标或构建bundle。各组件条款及本次不打包SDK的依据见[SDK说明](live2d/SDK_NOTICES.md)。用户从[官方获取](https://www.live2d.com/en/sdk/download/web/)，分别遵守实际包内条款；公开SDK接口和构建成功不等于取得出版许可。
 
 ## 安装时取得的依赖
 

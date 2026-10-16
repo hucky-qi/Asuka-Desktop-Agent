@@ -1,0 +1,9 @@
+{
+  "model": "./models/Asuka/Asuka_Tilt_Hair_Work.model3.json",
+  "label": "明日香 v7：待机双马尾与缓慢搜索倾斜",
+  "sample": false,
+  "sdk": "Cubism SDK for Web 5-r.5",
+  "fallbackModel": null,
+  "scale": 0.88,
+  "tailOutputGain": 1.6
+}

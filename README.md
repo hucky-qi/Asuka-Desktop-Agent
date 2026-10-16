@@ -6,7 +6,7 @@
 2. **桌面聊天**：macOS悬浮外壳、独立Qwen多轮会话、显式长期记忆、可选百度搜索摘要；可自行配置合法Live2D资源。
 3. **本机日历**：真实系统时间、授权日历查询、预览确认式创建；已有文字修改实现，但提取稳定性和真实修改仍待验收。
 
-这是个人项目的完整稳定源码导出，包含当前业务代码，不是最小聊天示例。它也不是已公证的通用桌面发行版。未包含私人运行数据、角色素材或第三方SDK。自有源码尚未指定开源许可证，公开可见不等于获得再分发授权，详见[许可边界](LICENSES.md)。
+这是个人项目的完整稳定源码导出，包含当前业务代码，不是最小聊天示例。它也不是已公证的通用桌面发行版。未包含私人运行数据或第三方SDK；追加了单独声明权利边界的Asuka v7最小同人运行素材。自有源码尚未指定开源许可证，公开可见不等于获得再分发授权，详见[许可边界](LICENSES.md)。
 
 ## 状态与平台
 
@@ -57,7 +57,7 @@ ollama pull qwen3-embedding:0.6b
 .venv/bin/python launch_desktop.py
 ```
 
-默认使用已有蓝色原生回退角色，提供小聊天及完整文件助手入口；不需要下载角色。单击切换聊天，拖动移动，右键打开文件助手、停止等待任务或退出。退出人物不会停止后端/Ollama。确认式日历功能需要下面的正式本机应用入口，直接运行Python人物不等于有EventKit授权身份。
+未构建Live2D时使用已有蓝色原生回退角色，提供小聊天及完整文件助手入口。Asuka v7运行素材已附带，SDK仍需官方获取并本机构建，详见下方。单击切换聊天，拖动移动，右键打开文件助手、停止等待任务或退出。退出人物不会停止后端/Ollama。确认式日历功能需要下面的正式本机应用入口，直接运行Python人物不等于有EventKit授权身份。
 
 生成本机入口（不附带角色图标，默认系统图标）：
 
@@ -66,6 +66,24 @@ ollama pull qwen3-embedding:0.6b
 ```
 
 会在桌面生成“明日香助手.app”，源码/数据仍在克隆目录；不要移动项目后继续用旧入口。可用`--icon /path/to/your-authorized-image.png`提供自己有权使用的图片，原比例转换；不会自动获取角色图。首次运行可能需要系统文件夹和日历访问授权。应用是本机ad-hoc签名，不是公证安装包；命令生成的入口与当前私有部署是同一启动逻辑，但本轮未替换用户现有桌面应用。模型与第三方许可见[DESKTOP](docs/DESKTOP.md)。
+
+
+## 可选Asuka v7同人运行资源（本次补齐）
+
+已附带model3.json实际引用的5个文件：moc3、单张1024纹理、DisplayInfo、头发physics3及model3本身；不含旧版/编辑源/录屏/SDK。眨眼、呼吸、歪头、头发输入仍由现有代码驱动，没有缺失的motion3文件要另行下载。制作过程及AI来源核实限制见[素材NOTICE](live2d/models/Asuka/NOTICE.md)，资源哈希见[manifest](live2d/models/Asuka/manifest.json)。**非官方同人、未声称官方授权；同人指南未明确涵盖GitHub模型包，商业/再分发及原图权利仍需确认。**
+
+从[Live2D官方](https://www.live2d.com/en/sdk/download/web/)自行取得Web SDK并核对条款后：
+
+```sh
+cd live2d
+npm ci
+../.venv/bin/python prepare.py --sdk /path/to/CubismSdkForWeb-5-r.5 --asuka
+npm run build
+cd ..
+.venv/bin/python launch_desktop.py
+```
+
+SDK不进入Git，代码/角色素材/SDK分别适用不同权利边界，详见[SDK获取与条件](live2d/SDK_NOTICES.md)和[LICENSES](LICENSES.md)。不构建时保留原蓝色回退；本轮不提供打包App或SDK镜像。
 
 ## 搜索目录与索引
 

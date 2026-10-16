@@ -1,0 +1,40 @@
+{
+  "model": "Asuka_Tilt_Hair_Work.model3.json",
+  "revision": "v7",
+  "sdk_export_target": "SDK5.3",
+  "texture_size": [
+    1024,
+    1024
+  ],
+  "files": [
+    {
+      "path": "Asuka_Idle_Tails.physics3.json",
+      "bytes": 2095,
+      "sha256": "cdf38d480e08ca55dfc252bd394be57a3d62c51c5b9bfeb2babebec880965858"
+    },
+    {
+      "path": "Asuka_Tilt_Hair_Work.1024/texture_00.png",
+      "bytes": 747842,
+      "sha256": "b901228f8ddb57b2614dee2d3e91bffb1399a842bd4832edf8192501bfe67678"
+    },
+    {
+      "path": "Asuka_Tilt_Hair_Work.cdi3.json",
+      "bytes": 2184,
+      "sha256": "063d98296abc32cdc97f5248ff164eea4a8255f0f3cbf69c08830561e5c890d7"
+    },
+    {
+      "path": "Asuka_Tilt_Hair_Work.moc3",
+      "bytes": 33664,
+      "sha256": "92784a16856babad40cad1bc76fd12a8062530bcda86cfd565ccc9aa114846ed"
+    },
+    {
+      "path": "Asuka_Tilt_Hair_Work.model3.json",
+      "bytes": 260,
+      "sha256": "274b4dc2eb113875864c0c6fe5770821408716d0a074ceea12e8740a3b30b83c"
+    }
+  ],
+  "motion_files": 0,
+  "motion_note": "Blink, breath, tilt and idle hair input are runtime parameter control; physics is referenced above. No missing motion3 export is fabricated.",
+  "third_party_sdk_included": false,
+  "rights_status": "Unofficial fan work. No official character authorization asserted; GitHub runtime-model distribution not expressly covered by cited fan-work guideline."
+}
