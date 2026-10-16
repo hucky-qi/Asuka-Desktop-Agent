@@ -28,3 +28,5 @@ prepare仅复制本机指定资源，包含路径越界检查；不自动下载S
 发布副本另增加无模型原生就绪标记，避免.app把正常蓝色回退误判为启动超时；应用权限说明与当前确认式创建/修改能力一致。未触碰原机应用或签名。
 
 本次发布增量只补齐运行资源/构建与权利说明，未改角色动作、搜索或日历。SDK不分发，完整步骤与条款依据见[SDK_NOTICES](../live2d/SDK_NOTICES.md)。
+
+2026-10-16全新安装修补：`settings.PORT/LIVE2D_PORT`支持`LOCAL_FILE_CHAT_PORT`/`LOCAL_FILE_CHAT_LIVE2D_PORT`；CLI父子进程一致，Live2D health须属于当前克隆。默认不变、占用不杀进程，不从百度.env读取端口。Finder启动不保证继承shell export，可改settings默认值；测试App输出到独立目录且没有替换原入口。blue/Asuka真实原生就绪通过，点击聊天/右键导航仍是原生缺口，浏览器页面通过另记。

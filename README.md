@@ -51,6 +51,21 @@ ollama pull qwen3-embedding:0.6b
 
 也可运行`.venv/bin/python start.py --web-only`按需启动/复用后台服务，日志在`.runtime/server.log`。它不会停其他服务；停止后台服务须先确认是本项目进程再终止，不使用全局kill命令。
 
+### 同机并行安装与隔离端口
+
+默认后端8765、Live2D资源8766。已有助手或其他服务占用时，不结束它们，启动前在当前终端明确配置空闲端口：
+
+```sh
+export LOCAL_FILE_CHAT_PORT=18765
+export LOCAL_FILE_CHAT_LIVE2D_PORT=18766
+.venv/bin/python app.py
+# 或在同样的环境中运行：.venv/bin/python launch_desktop.py
+```
+
+端口必须为1–65535，仍只绑定127.0.0.1。后端、人物及资源服务沿用同一配置，资源health必须属于当前项目，不能复用别的克隆。变量由`settings.py`读取，不从百度`.env`加载；未设置时原默认不变。若希望**双击.app**也使用非默认端口，可修改`settings.py`中`PORT`/`LIVE2D_PORT`的默认值；不要假设Finder启动会继承终端export。临时验收应用可用`macos/create_desktop_app.py --output /path/to/InstallationAcceptance.app`生成到独立目录，不覆盖桌面现有应用。
+
+验收/演示仅用人工样本时，可按已有配置方式将`settings.SEARCH_ROOTS`限制为`{"workspace": WORKSPACE}`，不要点击全盘/私人目录索引。此项是验收范围配置，不是更改发布默认搜索范围；启动不自动开启索引。
+
 ### macOS桌面模式（无人物素材也能用）
 
 ```sh
@@ -143,3 +158,21 @@ DeepSeek适配接口已保留，默认禁用、未真实验证、无自动降级
 [文件搜索](docs/SEARCH.md) · [桌面](docs/DESKTOP.md) · [日历](docs/CALENDAR.md) · [模型/联网/数据](docs/MODELS_AND_WEB.md) · [测试](docs/TESTING.md) · [路线图](docs/ROADMAP.md) · [许可](LICENSES.md)
 
 后续：先收敛创建/修改原生验收和复杂检索遗留问题；主动提醒、iPhone快捷指令原型、可编辑语音输入、完整App/模型管理、Windows适配、更多动作、DeepSeek显式付费确认、VPN及网页操作均是规划，未实现的不写成支持。
+
+## 全新安装验收（2026-10-16）
+
+从远端`9aff2c2`在项目之外全新clone，独立Python venv、pip无缓存安装、独立npm依赖/缓存，无开发目录环境、构建物或私人数据。macOS本次结果：
+
+| 项目 | 实际结果 |
+| --- | --- |
+| README运行/测试依赖安装 | 通过 |
+| 无Key后端、网页、闲聊页面 | 通过；联网关闭/待配置，不伪造成功 |
+| 人工名称搜索/PDF筛选/空结果 | 通过；未建语义库，明确仅名称覆盖 |
+| 无SDK且临时移走模型后的蓝色回退 | 独立构建的测试App实际启动并就绪 |
+| 官方SDK全新下载 | **未完成**：需用户阅读/同意条款，首次下载有身份/邮件输入，本轮未代接受或下载 |
+| 已有合法本地Web 5-r.5 SDK续测 | 明确使用用户Downloads内SDK，准备/build/实际浏览器渲染/原生WKWebView就绪通过；不是全新下载通过 |
+| .app构建及启动 | 独立目录构建并启动，通过blue及Asuka原生就绪；未覆盖桌面入口、未请求日历权限 |
+| 原生点击聊天/右键打开完整网页 | 未自动验收；对应真实浏览器页面及导航通过，不冒充原生鼠标通过 |
+| 模型问答/语义及云端/私人日历 | 真实调用0，不在本轮功能验收范围 |
+
+必要修补仅支持隔离端口、验证资源服务所属项目及说明启动方式；默认行为不变。新用户仍需自备Python/Ollama、需要时自行下载模型，Live2D需自行从官方完成SDK许可/下载；本轮没有下载大模型。Windows仍未实测。详见[TESTING](docs/TESTING.md)。
