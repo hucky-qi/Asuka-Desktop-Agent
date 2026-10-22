@@ -17,162 +17,94 @@
 .web-toggle,#usage,#memory{font-size:8px}
 #status{overflow:visible;text-overflow:clip}
 .identity-tools{flex-wrap:wrap;gap:3px}.identity{padding-bottom:4px}
-</style><section class="bubble"><svg class="outline" viewBox="0 0 260 190" preserveAspectRatio="none" aria-hidden="true"><path d="M18 4 H230 Q244 4 244 18 V151 Q244 164 236 166 L256 186 L222 166 H18 Q4 166 4 152 V18 Q4 4 18 4 Z" fill="#fffdf9" stroke="#111" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg><div id="answer" role="status"><div class="welcome"><p>你好，想聊点什么？</p><p>可以直接聊天，也可以说：</p><p class="welcome-example">帮我把明晚9点打电话加入日程</p><p class="welcome-note">确认后才会加入日历</p></div></div><div id="sources" hidden></div><div class="identity"><span class="identity-main"><span class="name">明日香</span><span class="model">本地 Qwen · 未联网</span><span id="status" aria-live="polite">未重置</span></span><span class="identity-tools"><label class="web-toggle" title="百度搜索摘要：不读取网页正文"><input id="web" type="checkbox" disabled>联网搜索</label><span id="usage" title="本助手近24小时请求次数；不是百度官方剩余免费额度">近24小时：—</span><button id="memory" type="button" title="显式长期记忆操作">记忆</button></span></div><form><textarea id="input" rows="1" maxlength="1000" placeholder="聊点什么…" title="可说：帮我把明天21点到21点半面试加入日历" aria-label="闲聊输入"></textarea><button id="send" type="button" aria-label="发送">发送</button><button id="reset" type="button" aria-label="重置对话" title="清除当前对话，保留长期记忆；彻底清除请输入：清空长期记忆">重置</button></form></section><script src="/input-guard.js"></script><script>
+#model{background:transparent;color:#79462f;padding:0;font-size:8px;white-space:nowrap}.cloud-consent{white-space:normal;font-size:10px;line-height:1.45}.cloud-consent p{margin:4px 0}.cloud-consent label{display:block}.cloud-consent button{font-size:10px;padding:4px;margin:3px 4px 0 0}
+/* Composer rows preserve window size and tail; long content stays in answer scroll. */
+.network-row{display:flex;align-items:center;flex-shrink:0;gap:5px;min-height:14px;margin-bottom:3px;min-width:0}.network-row .web-toggle,#usage{font-size:8px;white-space:nowrap}#settings{margin-left:auto;background:transparent;color:#79462f;padding:0 2px;font-size:12px;line-height:14px;height:14px;min-width:16px}
+.chat-footer{display:flex;align-items:center;gap:4px;flex-shrink:0;min-width:0;max-width:100%;font-size:8px;color:#8c7060;min-height:12px;margin-top:2px}.chat-footer #model{flex:0 1 auto;min-width:0;max-width:calc(100% - 50px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px;text-align:left}.chat-footer #status{flex:0 0 auto;font-size:8px}
+</style><section class="bubble"><svg class="outline" viewBox="0 0 260 190" preserveAspectRatio="none" aria-hidden="true"><path d="M18 4 H230 Q244 4 244 18 V151 Q244 164 236 166 L256 186 L222 166 H18 Q4 166 4 152 V18 Q4 4 18 4 Z" fill="#fffdf9" stroke="#111" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg><div id="answer" role="status"><div class="welcome"><p>你好，想聊点什么？</p><p>可以聊天、找文件或安排日程。</p></div></div><div id="sources" hidden></div><div class="network-row"><label class="web-toggle" title="首次搜索；追问复用摘要，更新信息点新搜索"><input id="web" type="checkbox" disabled>联网搜索</label><span id="usage" title="本助手滚动24小时请求次数；不是百度官方剩余额度">—</span><button id="settings" type="button" aria-label="聊天设置" aria-haspopup="dialog" title="模型与记忆设置">⚙</button></div><form><textarea id="input" rows="1" placeholder="聊点什么…" title="输入问题，或描述要查找的文件与日程" aria-label="闲聊输入"></textarea><button id="send" type="button" aria-label="发送">发送</button><button id="reset" type="button" aria-label="重置对话" title="清除当前对话，保留长期记忆；彻底清除请输入：清空长期记忆">重置</button></form><div class="chat-footer"><button class="model" id="model" type="button" title="模型与设置">Flash</button><span aria-hidden="true">·</span><span id="status" aria-live="polite">未重置</span></div></section><script src="/persona-view.js"></script><script src="/calendar-view.js"></script><script src="/file-qa-view.js"></script><script src="/memory-view.js"></script><script src="/speech-view.js"></script><script src="/input-guard.js"></script><script src="/daily-settings.js"></script><script>
 const answer=document.querySelector('#answer'),status=document.querySelector('#status'),input=document.querySelector('#input'),send=document.querySelector('#send'),resetButton=document.querySelector('#reset');
 const sources=document.querySelector('#sources'),web=document.querySelector('#web');
-web.onchange=()=>{document.querySelector('.model').textContent=web.checked?'本地 Qwen · 百度摘要':'本地 Qwen · 未联网'};
-async function refreshWebConfig(){try{const c=await fetch('/api/bubble/config',{signal:AbortSignal.timeout(12000)}).then(r=>r.json());const usage=document.querySelector('#usage');usage.textContent=c.usage?'近24小时：'+c.usage.used+'/'+c.usage.limit:'近24小时：—';web.disabled=!c.web_configured||!!c.usage?.limit_reached;if(web.disabled){web.checked=false;document.querySelector('.model').textContent='本地 Qwen · 未联网';}web.parentElement.title=!c.web_configured?'百度联网待配置：Key、免费资源和计费状态需确认':c.usage?.limit_reached?'今日上限已达':'百度搜索摘要：仅本次问题，不读取网页正文';usage.title='本助手近24小时请求次数；不是百度官方剩余免费额度'+(c.usage?.limit_reached?'；今日上限已达':'');}catch{document.querySelector('#usage').textContent='近24小时：—'}}
+web.onchange=()=>modelLabel();
+async function refreshWebConfig(){try{const c=await fetch('/api/bubble/config',{signal:AbortSignal.timeout(12000)}).then(r=>r.json());const usage=document.querySelector('#usage');usage.textContent=c.usage?c.usage.used+'/'+c.usage.limit:'—';web.disabled=!c.web_configured||!!c.usage?.limit_reached;if(web.disabled){web.checked=false;document.querySelector('.model').textContent='本地 Qwen · 未联网';}modelLabel();web.parentElement.title=!c.web_configured?'百度联网待配置：Key、免费资源和计费状态需确认':c.usage?.limit_reached?'今日上限已达':'百度搜索摘要：仅本次问题，不读取网页正文';usage.title='本助手近24小时请求次数；不是百度官方剩余免费额度'+(c.usage?.limit_reached?'；今日上限已达':'');}catch{document.querySelector('#usage').textContent='—'}}
 refreshWebConfig();
 window.addEventListener('focus',()=>refreshWebConfig());
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshWebConfig()});
 setInterval(()=>refreshWebConfig(),15000);
-document.querySelector('#memory').onclick=()=>{if(active)return;answer.textContent='记住：偏好或事实\n查看长期记忆\n忘记：编号或完整内容\n清空长期记忆\n普通重置只清当前对话，保留长期记忆。';sources.hidden=true};
-let sid=null,epoch=0,active=null,sequence=0,completeTimer=null,sessionInitialized=false,conversationEmpty=null;
-try{sid=sessionStorage.getItem('bubble-session-id')||null}catch{}
+document.querySelector('#settings').onclick=()=>document.querySelector('#model').click();
+let selectedProvider="deepseek",modelInfo=null;
+let recoveryNotice=null,restorePromise=null,preparing=false;let sid=null,epoch=0,active=null,sequence=0,completeTimer=null,sessionInitialized=false,conversationEmpty=null,selectedEdit=null,lastCalendarQuery=null,currentFiles=null,fileResultsReturn=null,fileSelectionBusy=false,memoryReturn=null;
+try{sid=sessionStorage.getItem('bubble-session-id')||CalendarDraftStore.read()?.owner||null}catch{}
 function rememberSession(value){sid=value;try{sessionStorage.setItem('bubble-session-id',value)}catch{}}
 function sessionStatus(empty){conversationEmpty=empty;sessionInitialized=true;status.textContent=empty?'已重置':'未重置';}
 function safeMessage(value,fallback='操作失败，请稍后重试。'){
  const text=String(value||'');return !text||text.length>350||/Traceback|Bearer|api[_-]?key|token\s*[=:]|\/(?:Users|home|Volumes|tmp)\/|https?:\/\//i.test(text)?fallback:text;
 }
 function notice(message){const line=document.createElement('p');line.className='operation-notice';line.textContent=safeMessage(message);answer.append(line);answer.scrollTop=answer.scrollHeight;}
-async function restoreSession(){const at=epoch;if(active||resetButton.disabled)return;try{const r=await post('/api/bubble/session',{session_id:sid});if(epoch===at&&!active&&!resetButton.disabled){rememberSession(r.session_id);sessionStatus(r.conversation_empty);controls(false)}}catch(e){if(epoch===at&&!active){notice(safeMessage(e.message,'会话读取失败，请重置对话后重试。'));}}}
+function resumeHint(){try{return JSON.parse(sessionStorage.getItem('bubble-resume-hint')||'{}')}catch{return {}}}
+function saveDraft(){try{sessionStorage.setItem('bubble-draft',JSON.stringify({text:input.value.length<=4000?input.value:'',overflow:input.value.length>4000,at:Date.now()}))}catch{}}
+try{const d=JSON.parse(sessionStorage.getItem('bubble-draft')||'null');if(d&&Date.now()-d.at<86400000){input.value=d.text;if(d.overflow){const note=document.createElement('p');note.textContent='上次草稿过长，未持久化；当前可见内容不代表完整草稿。';answer.append(note)}}}catch{}
+input.addEventListener('input',saveDraft);window.addEventListener('pagehide',saveDraft);
+function restoreSession(){if(restorePromise)return restorePromise;restorePromise=restoreSessionOnce().finally(()=>{restorePromise=null});return restorePromise}
+async function restoreSessionOnce(){const at=epoch;if(active||resetButton.disabled)return false;try{const r=await post('/api/bubble/session',{session_id:sid,recover:true,resume_hint:resumeHint()});if(epoch!==at||active||resetButton.disabled)return false;const changed=!!sid&&r.session_id!==sid;if(changed){++epoch;selectedEdit=null;lastCalendarQuery=null;currentFiles=null;fileResultsReturn=null;memoryReturn=null;}rememberSession(r.session_id);sessionStatus(r.conversation_empty);selectedEdit=r.calendar_edit||null;if(r.model)applyModel(r.model);if(r.chat_view&&answer.querySelector('.welcome'))renderAnswer(r.chat_view);if(r.file_snapshot&&answer.querySelector('.welcome'))renderFiles(r.file_snapshot);else if(selectedEdit&&answer.querySelector('.welcome'))renderSelectedEdit(selectedEdit);if(r.recovery?.message){notice(r.recovery.message);recoveryNotice=r.recovery.message;}if(CalendarDraftStore.read()){if(answer.querySelector('.welcome'))renderCalendarRecovery(CalendarDraftStore.read());else offerCalendarRecovery(CalendarDraftStore.read());}controls(false);return true}catch(e){if(epoch===at&&!active){notice(safeMessage(e.message,'连接暂不可用，草稿已保留；请稍后发送，不会自动重发。'));}return false}}
+window.addEventListener('focus',()=>{if(!active)restoreSession()});document.addEventListener('visibilitychange',()=>{saveDraft();if(!document.hidden&&!active)restoreSession()});
 
-const panelPageID=crypto.randomUUID();
+const panelPageID=crypto.randomUUID();window.localFileChatPanelPageID=panelPageID;
 function panelEvent(kind,task){globalThis.webkit?.messageHandlers?.bubblePanel?.postMessage({kind,page_id:panelPageID,request_id:task?.id||'',version:kind==='reset'?epoch:(task?.generation??epoch)});}
 window.localFileChatTaskState={state:'idle',request_id:null,sequence:0};
 function state(value,rid){clearTimeout(completeTimer);const detail={state:value,request_id:rid,sequence:++sequence,at:Date.now()};window.localFileChatTaskState=detail;document.dispatchEvent(new CustomEvent('local-file-chat-task',{detail}));if(value==='complete')completeTimer=setTimeout(()=>state('idle',rid),3000)}
 function beginState(rid){sequence=0;state('queued',rid)}
 async function post(path,data,signal){const response=await fetch(path,{signal,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const result=await response.json();if(!response.ok)throw Error(safeMessage(result.error));return result}
-function controls(busy){send.disabled=(!sessionInitialized&&!busy)||resetButton.disabled||!!(busy&&active?.calendarWrite);send.textContent=busy?(active?.calendarWrite?'核对中':'停止'):'发送';send.setAttribute('aria-label',busy?'停止生成':'发送')}
-async function cancel(){const task=active;if(!task)return;if(task.calendarWrite){notice('写入已开始，请等待核对结果，尚不能确认完成。');return;}epoch++;const stoppedEpoch=epoch;active=null;task.controller.abort();controls(false);state('idle',task.id);answer.textContent='任务已取消，未完成的回答未保存。';panelEvent('stopped',task);try{await post('/api/bubble/cancel',{session_id:sid,request_id:task.id});await restoreSession()}catch(error){if(epoch===stoppedEpoch)notice('停止请求未确认：'+safeMessage(error.message))}}
+function controls(busy){document.querySelector('#settings').disabled=busy||fileSelectionBusy;document.querySelector('#model').disabled=busy||fileSelectionBusy;send.disabled=fileSelectionBusy||(!sessionInitialized&&!busy)||resetButton.disabled||!!(busy&&active?.calendarWrite);send.textContent=busy?(active?.calendarWrite?'核对中':'停止'):'发送';send.setAttribute('aria-label',busy?'停止生成':'发送')}
+async function cancel(){const task=active;if(!task)return;if(task.calendarWrite){notice('写入已开始，请等待核对结果，尚不能确认完成。');return;}epoch++;const stoppedEpoch=epoch;active=null;selectedEdit=null;task.controller.abort();controls(false);state('idle',task.id);answer.textContent='任务已取消，未完成的回答未保存。';panelEvent('stopped',task);try{const stopped=await post('/api/bubble/cancel',{session_id:sid,request_id:task.id});if(stopped.memory_committed)notice('该次记忆操作已完成；取消不会撤回已保存条目，可在记忆入口核对或忘记。');await restoreSession()}catch(error){if(epoch===stoppedEpoch)notice('停止请求未确认：'+safeMessage(error.message))}}
 send.onclick=()=>active?cancel():document.querySelector('form').requestSubmit();
-resetButton.onclick=async()=>{const task=active;epoch++;active=null;task?.controller.abort();resetButton.disabled=true;controls(true);state('idle',task?.id||null);try{const result=await post('/api/bubble/reset',{session_id:sid,request_id:task?.id});rememberSession(result.session_id);sessionStatus(true);renderWelcome();sources.replaceChildren();sources.hidden=true;input.value='';if(task?.calendarWrite)answer.textContent='已确认的日历写入可能仍在进行；请在系统日历核对，勿重复创建。';panelEvent('reset',task)}catch(error){answer.textContent='重置操作失败：'+safeMessage(error.message);panelEvent('error',task)}finally{resetButton.disabled=false;controls(false)}};
-document.querySelector('form').onsubmit=async event=>{event.preventDefault();const question=input.value.trim();if(!question||active||resetButton.disabled||!sessionInitialized)return;const task={id:crypto.randomUUID(),generation:++epoch,controller:new AbortController(),webEnabled:web.checked,answerBuffer:'',sourceItems:[]};active=task;panelEvent('begin',task);beginState(task.id);controls(true);sources.replaceChildren();sources.hidden=true;let first=true;const timeout=setTimeout(()=>{if(active===task)cancel()},65000);
-try{const response=await fetch('/api/bubble/chat',{method:'POST',headers:{'Content-Type':'application/json'},signal:task.controller.signal,body:JSON.stringify({question,session_id:sid,request_id:task.id,web_enabled:task.webEnabled})});if(!response.ok){const e=await response.json();throw Error(safeMessage(e.error,'操作失败：服务暂不可用，请稍后重试。'))}if(active!==task||epoch!==task.generation)return;sessionStatus(false);const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';
-function receive(data){if(active!==task||epoch!==task.generation||data.request_id!==task.id)return;if(data.type==='session'){rememberSession(data.session_id);sessionStatus(data.conversation_empty===true);}if(data.type==='stage'){state(data.state,task.id);}if(data.type==='sources'){task.sourceItems=data.items||[];}if(data.type==='delta'){task.answerBuffer+=data.text;}if(data.type==='error')throw Error(data.error);if(data.type==='done'){task.completed=true;state(data.state||'idle',task.id);if(data.cancelled){answer.textContent='任务已取消，未完成的回答未保存。';panelEvent('stopped',task)}if(!data.cancelled){renderAnswer(data.answer??task.answerBuffer);if(data.calendar_events)renderCalendarEvents(data.calendar_events);if(data.calendar_offer)renderCalendarOffer(data.calendar_offer);if(data.calendar_update_selection)renderCalendarUpdateSelection(data.calendar_update_selection);if(data.calendar_update_preview)renderCalendarUpdatePreview(data.calendar_update_preview);if(data.calendar_preview||data.calendar_draft)renderCalendarPreview(data.calendar_preview||data.calendar_draft);answer.scrollTop=0;if(task.sourceItems.length){sources.replaceChildren(document.createTextNode('百度搜索摘要 · '));for(const [i,item] of task.sourceItems.entries()){const a=document.createElement('a');a.href=item.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='['+(i+1)+'] '+item.title;a.title=item.url;sources.appendChild(a)}sources.hidden=false;}if(input.value.trim()===question)input.value='';panelEvent('ready',task)}}}
+resetButton.onclick=async()=>{const task=active;epoch++;active=null;task?.controller.abort();resetButton.disabled=true;controls(true);state('idle',task?.id||null);try{const result=await post('/api/bubble/reset',{session_id:sid,request_id:task?.id});rememberSession(result.session_id);sessionStatus(true);selectedEdit=null;lastCalendarQuery=null;currentFiles=null;fileResultsReturn=null;memoryReturn=null;CalendarDraftStore.clear();renderWelcome();if(result.model)applyModel(result.model);sources.replaceChildren();sources.hidden=true;input.value='';if(task?.calendarWrite)answer.textContent='已确认的日历写入可能仍在进行；请在系统日历核对，勿重复创建。';panelEvent('reset',task)}catch(error){answer.textContent='重置操作失败：'+safeMessage(error.message);panelEvent('error',task)}finally{resetButton.disabled=false;controls(false)}};
+async function submitQuestion(override=null,qaContinue=null,newSearch=false){const question=override??input.value.trim();if(!question||active||fileSelectionBusy||resetButton.disabled||preparing)return;preparing=true;try{if(!await restoreSession())return;}finally{preparing=false;}if(active||resetButton.disabled)return;const task={id:crypto.randomUUID(),generation:++epoch,controller:new AbortController(),recoveryNotice,webEnabled:web.checked,answerBuffer:'',sourceItems:[]};active=task;recoveryNotice=null;memoryReturn=null;panelEvent('begin',task);beginState(task.id);controls(true);sources.replaceChildren();sources.hidden=true;let first=true;const timeout=setTimeout(()=>{if(active===task)cancel()},65000);
+try{const response=await fetch('/api/bubble/chat',{method:'POST',headers:{'Content-Type':'application/json'},signal:task.controller.signal,body:JSON.stringify({question,session_id:sid,request_id:task.id,web_enabled:task.webEnabled,web_new_search:newSearch,calendar_edit_id:selectedEdit?.id||null,file_snapshot_id:currentFiles?.snapshot_id||null,qa_continue:qaContinue})});if(!response.ok){const e=await response.json();throw Error(safeMessage(e.error,'操作失败：服务暂不可用，请稍后重试。'))}if(active!==task||epoch!==task.generation)return;sessionStatus(false);const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';
+function receive(data){if(active!==task||epoch!==task.generation||data.request_id!==task.id)return;if(data.persona)PersonaView.set(data.persona);if(data.type==='session'){rememberSession(data.session_id);sessionStatus(data.conversation_empty===true);}if(data.type==='stage'){state(data.state,task.id);}if(data.type==='sources'){task.sourceItems=data.items||[];}if(data.type==='done'&&data.sources){task.sourceItems=data.sources;}if(data.type==='delta'){task.answerBuffer+=data.text;}if(data.type==='error')throw Error(data.error);if(data.type==='done'){task.completed=true;state(data.state||'idle',task.id);if(data.cancelled){answer.textContent='任务已取消，未完成的回答未保存。';panelEvent('stopped',task)}if(!data.cancelled){renderAnswer(data.answer??task.answerBuffer);if(task.recoveryNotice)notice(task.recoveryNotice);if(data.calendar_edit){selectedEdit=data.calendar_edit;if(!data.calendar_update_preview){renderSelectedEdit(selectedEdit);notice(data.answer||'请补充目标时间。')}}if(data.calendar_events)renderCalendarEvents(data.calendar_events);if(data.calendar_offer)renderCalendarOffer(data.calendar_offer);if(data.calendar_update_selection)renderCalendarUpdateSelection(data.calendar_update_selection);if(data.calendar_update_preview)renderCalendarUpdatePreview(data.calendar_update_preview);if(data.calendar_preview||data.calendar_draft)renderCalendarPreview(data.calendar_preview||data.calendar_draft);if(data.calendar_recovery)renderCalendarRecovery(data.calendar_recovery);else CalendarDraftStore.clear();answer.scrollTop=0;if(task.sourceItems.length){sources.replaceChildren(document.createTextNode('百度搜索摘要 · '));for(const [i,item] of task.sourceItems.entries()){const a=document.createElement('a');a.href=item.url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='['+(i+1)+'] '+item.title;a.title=item.url;sources.appendChild(a)}const fresh=document.createElement('button');fresh.type='button';fresh.textContent='新搜索';fresh.title='输入新问题后点击；普通追问复用现有摘要';fresh.onclick=()=>{if(!input.value.trim()){notice('请输入新搜索问题；当前追问可复用已有摘要。');return;}web.checked=true;submitQuestion(null,null,true)};sources.appendChild(fresh);sources.hidden=false;}if(data.memory_proposal)renderMemoryProposal(data.memory_proposal);if(data.assistant_result?.kind==='files')renderFiles(data.assistant_result.data);if(data.assistant_result?.kind==='file_selection')renderFileSelection(data.assistant_result.data);qaView.render(data.assistant_result);if(data.assistant_result?.kind==='daily_records')memoryUI.renderRecords(data.assistant_result.data);if(input.value.trim()===question)input.value='';panelEvent('ready',task)}}}
 while(true){const part=await reader.read();buffer+=decoder.decode(part.value||new Uint8Array(),{stream:!part.done});let index;while((index=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,index);buffer=buffer.slice(index+1);if(line.trim())receive(JSON.parse(line))}if(part.done){if(buffer.trim())receive(JSON.parse(buffer));break}}
 if(!task.completed&&active===task&&epoch===task.generation)throw Error('回答连接中断，未收到完整答案');
-}catch(error){if(active===task&&epoch===task.generation){state('idle',task.id);answer.textContent=safeMessage(error.message,'操作失败：请求未完成，请稍后重试。');panelEvent('error',task)}}finally{clearTimeout(timeout);refreshWebConfig();if(active===task){active=null;controls(false)}}};
+}catch(error){if(active===task&&epoch===task.generation){state('idle',task.id);currentFiles=null;answer.textContent=safeMessage(error.message,'操作失败：请求未完成，请稍后重试。');panelEvent('error',task)}}finally{clearTimeout(timeout);refreshWebConfig();if(active===task){active=null;controls(false)}}};
+document.querySelector('form').onsubmit=event=>{event.preventDefault();return submitQuestion()};
+const qaView=createFileQAView({get sid(){return sid},get epoch(){return epoch},get active(){return active},get answer(){return answer},post,renderAnswer,safeMessage,applyModel,resubmit:submitQuestion,returnFiles:()=>{if(fileResultsReturn)renderFiles(fileResultsReturn)}});
 function renderAnswer(text){
- answer.replaceChildren();
+ currentFiles=null;answer.replaceChildren();
  for(const line of String(text).split('\n')){
   const row=document.createElement('div');let at=0;const pattern=/\*\*([^*\n]+)\*\*|\*([^*\n]+)\*/g;
   for(const m of line.matchAll(pattern)){row.appendChild(document.createTextNode(line.slice(at,m.index)));const e=document.createElement(m[1]?'strong':'em');e.textContent=m[1]||m[2];row.appendChild(e);at=m.index+m[0].length}
   row.appendChild(document.createTextNode(line.slice(at)));if(!line)row.appendChild(document.createElement('br'));answer.appendChild(row);
  }
 }
-function renderWelcome(){
- answer.replaceChildren();const box=document.createElement('div');box.className='welcome';
- for(const [text,cls] of [['你好，想聊点什么？',''],['可以直接聊天，也可以说：',''],['帮我把明晚9点打电话加入日程','welcome-example'],['确认后才会加入日历','welcome-note']]){const e=document.createElement('p');e.className=cls;e.textContent=text;box.append(e)}
- answer.append(box);
-}
-function renderCalendarEvents(meta){
- answer.replaceChildren();const box=document.createElement('div');box.className='calendar-preview';box.dataset.snapshotId=meta.snapshot_id;const version=epoch;
- const el=(tag,text,cls,parent=box)=>{const e=document.createElement(tag);e.className=cls||'';e.textContent=text;parent.append(e);return e};
- // All dates use the calendar response timezone, independent of the browser's timezone.
- const parts=value=>Object.fromEntries(new Intl.DateTimeFormat('zh-CN',{timeZone:meta.timezone,year:'numeric',month:'numeric',day:'numeric',weekday:'long',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(value)).map(p=>[p.type,p.value]));
- const day=p=>p.year+'-'+p.month+'-'+p.day, clock=p=>p.hour+':'+p.minute;
- const query=parts(meta.start),shortDate=p=>(p.year!==query.year?p.year+'年':'')+p.month+'月'+p.day+'日';
- el('div',query.year+'年'+query.month+'月'+query.day+'日 · '+query.weekday,'calendar-date');
- el('div','共'+meta.total+'项安排','calendar-count');
- if(meta.partial)el('p','覆盖不完整；未读取的内容不代表没有安排，请缩小查询范围。','calendar-warning');
- if(!meta.total&&!meta.partial)el('p','该范围内没有安排。');
- for(const event of meta.events){
-  const row=el('div','','calendar-event');row.dataset.eventId=event.event_id||'';
-  const start=parts(event.start),end=parts(event.end);let time;
-  if(event.all_day){
-   // EventKit all-day end is exclusive. Subtracting 1ms identifies the last covered local date, including DST days.
-   const last=parts(new Date(new Date(event.end).getTime()-1));
-   time='全天'+(day(start)!==day(last)?' · '+shortDate(start)+'–'+shortDate(last):'');
-  }else if(day(start)!==day(end)){
-   time='跨日 · 至'+shortDate(end)+clock(end);
-   if(start.year!==end.year&&end.year===query.year)time='跨日 · '+start.year+'年'+start.month+'月'+start.day+'日'+clock(start)+' 至'+shortDate(end)+clock(end);
-  }else time=clock(start)+'–'+clock(end);
-  const stamp=el('div',time,'event-time',row);stamp.title=event.start+' → '+event.end+' · '+meta.timezone;
-  el('div',event.title,'event-title',row);el('div',event.calendar_title||'','event-calendar',row);
- }
- if(meta.events.length<meta.retrieved){const more=el('button','查看更多（还有'+(meta.retrieved-meta.events.length)+'项）','calendar-more');more.type='button';more.id='calendar-more';more.onclick=async()=>{more.disabled=true;try{const r=await post('/api/bubble/calendar/more',{session_id:sid,snapshot_id:meta.snapshot_id});if(box.isConnected&&epoch===version)renderCalendarEvents(r)}catch(e){if(box.isConnected&&epoch===version){el('p',e.message,'calendar-warning');more.disabled=false}}}}
- const details=el('details','','query-details');el('summary','查询详情','',details);
- el('p','查询范围：'+meta.start+' → '+meta.end+'（结束不含）','',details);
- el('p','时区：'+meta.timezone+' · 所有已授权日历','',details);
- el('p','共'+meta.total+'项；已读取'+meta.retrieved+'项；显示'+meta.events.length+'项。','',details);
- if(meta.fetched_at)el('p','读取时间：'+meta.fetched_at,'',details);
- answer.appendChild(box);
-}
-function calendarUpdateStamp(e){
- const f=new Intl.DateTimeFormat('zh-CN',{timeZone:e.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone,year:'numeric',month:'2-digit',day:'2-digit',weekday:'long',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
- return (e.all_day?'全天 · ':'')+f.format(new Date(e.start))+' → '+f.format(new Date(e.end))+' · '+(e.calendar_title||'');
-}
-function renderCalendarUpdateSelection(p){
- answer.replaceChildren();const box=document.createElement('div');box.className='calendar-preview';box.dataset.selectionId=p.id;const at=epoch;
- const heading=document.createElement('p');heading.textContent='有多个匹配，请选择原事件，再查看修改预览：';box.append(heading);
- const select=document.createElement('select');select.setAttribute('aria-label','选择原日程');select.style.width='100%';
- for(const event of p.candidates){const option=document.createElement('option');option.value=event.event_id;option.textContent=calendarUpdateStamp(event)+' · '+event.title;select.append(option)}
- const yes=document.createElement('button'),no=document.createElement('button');yes.type=no.type='button';yes.id='calendar-update-select';yes.textContent='先看修改预览';no.textContent='取消';box.append(select,yes,no);answer.append(box);
- no.onclick=async()=>{try{await post('/api/bubble/calendar/update/cancel',{session_id:sid,preview_id:p.id});if(box.isConnected&&epoch===at)answer.textContent='已取消选择，没有修改日历。'}catch(e){if(box.isConnected&&epoch===at)notice(e.message)}};
- yes.onclick=()=>{if(box.isConnected&&epoch===at)runCalendarUpdate('/select',{selection_id:p.id,event_id:select.value},false,box)};
-}
-async function runCalendarUpdate(path,body,writing,box){
- if(active)return;const task={id:crypto.randomUUID(),generation:++epoch,controller:new AbortController(),calendarWrite:writing};active=task;for(const b of box.querySelectorAll('button,select'))b.disabled=true;
- panelEvent('begin',task);beginState(task.id);controls(true);
- try{
-  const result=await post('/api/bubble/calendar/update'+path,{session_id:sid,request_id:task.id,...body},task.controller.signal);
-  if(active!==task||epoch!==task.generation)return;state('idle',task.id);
-  if(result.calendar_update_preview){renderCalendarUpdatePreview(result.calendar_update_preview);if(result.message)notice(result.message)}
-  else if(result.status==='verified'){renderAnswer('已修改原事件并读回核对：\n'+result.event.title+'\n'+calendarUpdateStamp(result.event)+'\n'+result.event.timezone+'\n事件身份：'+result.event_id)}
-  else {const e=document.createElement('p');e.textContent=result.message||result.status;box.append(e);const yes=box.querySelector('#calendar-update-confirm');if(yes&&['uncertain','writing'].includes(result.status)){yes.disabled=false;yes.textContent='核对原操作'} }
-  panelEvent('ready',task);
- }catch(e){if(active===task&&epoch===task.generation){state('idle',task.id);notice(e.message);const line=document.createElement('p');line.textContent=writing?'结果未确认；不要另建事件或盲目重试。可核对原操作。':'读取未完成，没有修改。';box.append(line);if(writing){const yes=box.querySelector('#calendar-update-confirm');if(yes){yes.disabled=false;yes.textContent='核对原操作'}}panelEvent('error',task)}}
- finally{if(active===task){active=null;controls(false)}}
-}
-function renderCalendarUpdatePreview(p){
- answer.replaceChildren();const box=document.createElement('div');box.className='calendar-preview';box.dataset.updatePreviewId=p.id;const at=epoch;
- const line=text=>{const el=document.createElement('p');el.textContent=text;box.append(el)};
- line('修改前');line(p.original.title);line(calendarUpdateStamp({...p.original,timezone:p.timezone}));
- line('修改后');line(p.proposed.title);line(calendarUpdateStamp({...p.proposed,timezone:p.timezone}));line('时区：'+p.timezone);line(p.note);
- if(p.conflicts.length){line('目标时段存在以下重叠：');for(const event of p.conflicts){line((event.advisory?'全天安排（参考提示，不强制禁止） · ':'')+event.title+' · '+calendarUpdateStamp({...event,timezone:p.timezone}));line('重叠：'+event.overlap_start+' → '+event.overlap_end)}}else line('最新可读日历未发现重叠；确认时会再次核对。');
- const yes=document.createElement('button'),adjust=document.createElement('button'),no=document.createElement('button');yes.type=adjust.type=no.type='button';yes.id='calendar-update-confirm';yes.textContent=p.conflicts.length?'仍然修改':'确认修改';adjust.textContent='重新调整';adjust.id='calendar-update-adjust';no.textContent='取消';no.id='calendar-update-cancel';box.append(yes,adjust,no);answer.append(box);
- let ownedEpoch=at;
- yes.onclick=()=>{if(!box.isConnected)return;ownedEpoch=epoch+1;runCalendarUpdate('/confirm',{preview_id:p.id,confirm:true,accept_conflicts:p.conflicts.length>0},true,box)};
- const abandon=async(revise)=>{if(!box.isConnected||active||epoch!==ownedEpoch)return;yes.disabled=no.disabled=adjust.disabled=true;try{const r=await post('/api/bubble/calendar/update/cancel',{session_id:sid,preview_id:p.id});if(box.isConnected&&epoch===ownedEpoch){if(r.status==='cancelled'){answer.textContent=revise?'请重新输入要调整的字段，将生成新预览并再次确认；尚未修改。':'已取消预览，没有修改日历。';if(revise)input.focus()}else notice(r.message||r.status)}}catch(e){if(box.isConnected&&epoch===ownedEpoch)notice(e.message)}};
- adjust.onclick=()=>abandon(true);no.onclick=()=>abandon(false);
-}
+function renderWelcome(){answer.replaceChildren();const box=document.createElement('div');PersonaView.welcome(box);answer.append(box);}
 
-function renderCalendarOffer(offer){
- const box=document.createElement('div');box.className='calendar-preview';const version=epoch;const yes=document.createElement('button'),no=document.createElement('button');yes.type=no.type='button';yes.textContent='需要，先看预览';no.textContent='不用';yes.id='calendar-offer-yes';no.id='calendar-offer-no';box.append(yes,no);answer.append(box);
- no.onclick=async()=>{yes.disabled=no.disabled=true;try{await post('/api/bubble/calendar/offer',{session_id:sid,offer_id:offer.id,accept:false});if(box.isConnected&&epoch===version)box.replaceChildren(document.createTextNode('没有加入日历。'))}catch(e){if(box.isConnected&&epoch===version)notice(e.message)}};
- yes.onclick=async()=>{
-  if(active)return;const task={id:crypto.randomUUID(),generation:++epoch,controller:new AbortController()};active=task;yes.disabled=no.disabled=true;panelEvent('begin',task);beginState(task.id);controls(true);
-  try{const r=await post('/api/bubble/calendar/offer',{session_id:sid,offer_id:offer.id,request_id:task.id,accept:true},task.controller.signal);if(active!==task||epoch!==task.generation)return;if(r.error)throw Error(r.error);state('idle',task.id);renderAnswer(r.answer||'请核对预览');if(r.calendar_preview||r.calendar_draft)renderCalendarPreview(r.calendar_preview||r.calendar_draft);panelEvent('ready',task)}catch(e){if(active===task&&epoch===task.generation){state('idle',task.id);answer.textContent=safeMessage(e.message);panelEvent('error',task)}}finally{if(active===task){active=null;controls(false)}}
- };
+function renderFileSelection(data){renderAnswer(data.message||'已选择文件，尚未打开。');const p=document.createElement('p');p.textContent=(data.qa_files||[data.selected]).map(f=>f.name).join(' + ');answer.append(p);if(fileResultsReturn){const b=document.createElement('button');b.type='button';b.textContent='返回文件列表';b.onclick=()=>{if(!active)renderFiles(fileResultsReturn)};answer.append(b)}}
+function renderFiles(data){
+ currentFiles=data;fileResultsReturn=data;answer.replaceChildren();const box=document.createElement('div');box.className='calendar-preview file-results';box.dataset.fileSnapshot=data.snapshot_id;const at=epoch;
+ const line=text=>{const p=document.createElement('p');p.textContent=text;box.append(p)};
+ PersonaView.search(box,data);
+ for(const file of data.files){const row=document.createElement('div');row.className='calendar-event file-card';row.dataset.fileId=file.file_id;const title=document.createElement('div');title.textContent=file.name;row.append(title);const evidence=document.createElement('small');evidence.textContent=file.evidence_source||'名称／目录及已有索引依据';row.append(evidence);const choose=document.createElement('button');choose.type='button';choose.textContent='选择';choose.onclick=async()=>{if(active||fileSelectionBusy||epoch!==at||currentFiles?.snapshot_id!==data.snapshot_id)return;fileSelectionBusy=true;controls(false);try{const r=await post('/api/bubble/files/select',{session_id:sid,snapshot_id:data.snapshot_id,card_token:file.card_token});if(epoch===at&&currentFiles?.snapshot_id===data.snapshot_id)renderFileSelection(r.assistant_result.data)}catch(e){if(epoch===at)notice(e.message)}finally{fileSelectionBusy=false;controls(!!active)}};row.append(choose);const compare=document.createElement('button');compare.type='button';compare.textContent='加入对比';compare.onclick=async()=>{if(active||fileSelectionBusy||epoch!==at||currentFiles?.snapshot_id!==data.snapshot_id)return;fileSelectionBusy=true;controls(false);try{const r=await post('/api/bubble/files/select',{session_id:sid,snapshot_id:data.snapshot_id,card_token:file.card_token,add_to_compare:true});if(epoch===at)renderFileSelection(r.assistant_result.data)}catch(e){if(epoch===at)notice(e.message)}finally{fileSelectionBusy=false;controls(!!active)}};row.append(compare);box.append(row)}
+ const link=document.createElement('a');link.textContent='完整文件助手';link.target='_blank';link.rel='noopener';link.setAttribute('aria-disabled','true');box.append(link);answer.append(box);
+ post('/api/bubble/files/handoff',{session_id:sid,snapshot_id:data.snapshot_id}).then(r=>{if(box.isConnected&&epoch===at){link.href=r.url;link.removeAttribute('aria-disabled')}}).catch(()=>{if(box.isConnected)link.textContent='完整文件助手入口暂不可用'});
 }
-function renderCalendarPreview(p){
- answer.replaceChildren();const box=document.createElement('div');const previewEpoch=epoch;const stillCurrent=()=>box.isConnected&&epoch===previewEpoch;box.className='calendar-preview';box.dataset.previewId=p.id;
- const line=text=>{const e=document.createElement('p');e.textContent=text;box.appendChild(e)};
- line('待确认 · '+p.title);line(p.date_label);line(p.all_day?'全天（结束日期不含当天）':p.start.slice(11,16)+' → '+p.end.slice(11,16));line('本机时区：'+p.timezone);line('提醒：未设置（本轮不支持）');line('事件链接将保存本机防重复标记。');
- for(const w of p.warnings||[])line(w);
- const select=document.createElement('select');select.setAttribute('aria-label','目标日历');for(const c of p.calendars){const o=new Option(c.title,c.id);o.selected=c.id===p.calendar_id;select.add(o)}box.appendChild(select);
- const duplicate=document.createElement('input');duplicate.type='checkbox';duplicate.id='calendar-duplicate';
- if(p.duplicates?.length){line('可能重复：'+p.duplicates.map(d=>d.title+' '+d.start).join('；'));const label=document.createElement('label');label.append(duplicate,document.createTextNode('仍要创建一份新事件'));box.appendChild(label)}
- const yes=document.createElement('button'),no=document.createElement('button');yes.textContent='确认创建';yes.type=no.type='button';no.textContent='取消';yes.id='calendar-confirm';no.id='calendar-cancel';box.append(yes,no);line('修改时间/标题请重新输入，必须重新确认。');answer.appendChild(box);
- if(!p.calendars.length){
-  yes.disabled=select.disabled=true;line(p.message||'请完成系统日历授权后刷新，尚未创建');
-  const refresh=document.createElement('button');refresh.textContent='授权后刷新日历';refresh.type='button';box.appendChild(refresh);
-  refresh.onclick=async()=>{refresh.disabled=true;try{const r=await post('/api/bubble/calendar/refresh',{session_id:sid,preview_id:p.id});if(stillCurrent())renderCalendarPreview(r.calendar_preview)}catch(e){if(stillCurrent())notice(e.message)}finally{refresh.disabled=false}};
- }
- select.onchange=async()=>{yes.disabled=no.disabled=select.disabled=true;try{const r=await post('/api/bubble/calendar/revise',{session_id:sid,preview_id:p.id,calendar_id:select.value});if(stillCurrent())renderCalendarPreview(r.calendar_preview)}catch(e){notice(e.message);yes.disabled=no.disabled=select.disabled=false}};
- no.onclick=async()=>{yes.disabled=no.disabled=true;try{const r=await post('/api/bubble/calendar/cancel',{session_id:sid,preview_id:p.id});if(!stillCurrent())return;if(r.status==='cancelled')answer.textContent='已取消预览，没有写入日历。';else notice(r.message||r.status)}catch(e){notice(e.message)}};
- yes.onclick=async()=>{
-  if(active)return;const task={id:crypto.randomUUID(),generation:++epoch,controller:new AbortController(),calendarWrite:true};active=task;yes.disabled=no.disabled=select.disabled=true;panelEvent('begin',task);beginState(task.id);controls(true);
-  try{const r=await post('/api/bubble/calendar/confirm',{session_id:sid,preview_id:p.id,request_id:task.id,confirm:true,accept_duplicate:duplicate.checked});if(active!==task||epoch!==task.generation)return;
-   state('idle',task.id);
-   if(r.status==='verified'){answer.textContent='已创建并读回核对：'+r.event.title+'\n'+r.event.start+' → '+r.event.end+'\n'+r.event.timezone+'\n事件身份：'+r.event_id;void 0}
-   else if(r.status==='uncertain'||r.status==='writing'){line(r.message||'结果不确定，请核对原操作');yes.textContent='核对原操作';yes.disabled=false;no.disabled=true;void 0}
-   else {line(r.message||'未能创建：'+r.status);if(r.status==='duplicate_confirmation_required'){yes.disabled=no.disabled=false}}
-   panelEvent('ready',task);
-  }catch(e){if(active===task&&epoch===task.generation){state('idle',task.id);notice(e.message);line('结果未确认；可核对原操作，不要另建相同事件。');yes.textContent='核对原操作';yes.disabled=false;panelEvent('error',task)}}finally{if(active===task){active=null;controls(false)}}
- };
+async function showMemory(){
+ if(active)return;const at=epoch;
+ try{const result=await post('/api/bubble/memory',{session_id:sid,action:'list'});if(epoch===at&&!active){if(!answer.querySelector('.memory-panel')&&!answer.querySelector('[data-memory-proposal]'))memoryReturn={nodes:[...answer.childNodes],files:currentFiles,epoch:at,revision:result.revision,sourceHidden:sources.hidden};renderMemory(result)}}catch(e){if(epoch===at&&!active)memoryUI.failure(e)}
 }
+const memoryUI=createMemoryView({get sid(){return sid},get epoch(){return epoch},get active(){return active},get answer(){return answer},post,safeMessage,onRender:result=>renderMemoryBack(result)});
+function renderMemory(result){
+ currentFiles=null;sources.hidden=true;memoryUI.render(result);
+}
+function renderMemoryBack(result){const at=epoch;
+ if(memoryReturn&&memoryReturn.epoch===epoch){const b=document.createElement('button');b.type='button';b.textContent='返回回答';b.onclick=()=>{if(active||epoch!==at)return;const saved=memoryReturn;memoryReturn=null;if(saved.files)renderFiles(saved.files);else{answer.replaceChildren(...saved.nodes);currentFiles=saved.files;sources.hidden=saved.sourceHidden}if(result.revision!==saved.revision)notice('这是先前回答；记忆更改不删除历史文本。')};answer.prepend(b)}
+}
+function renderMemoryProposal(proposal){
+ currentFiles=null;answer.replaceChildren();const at=epoch,box=document.createElement('div');box.className='calendar-preview';box.dataset.memoryProposal=proposal.id;answer.append(box);
+ const line=text=>{const p=document.createElement('p');p.textContent=text;box.append(p)};
+ line(proposal.message||'请选择要更新的记忆，尚未覆盖。');line('新内容：'+proposal.text);
+ const apply=async(action,target_id)=>{if(active||epoch!==at||!box.isConnected)return;box.querySelectorAll('button').forEach(b=>b.disabled=true);try{const r=await post('/api/bubble/memory',{session_id:sid,action,proposal_id:proposal.id,target_id});if(epoch===at&&box.isConnected)renderMemory(r)}catch(e){if(epoch===at&&box.isConnected){line(safeMessage(e.message));box.querySelectorAll('button').forEach(b=>b.disabled=false)}}};
+ for(const row of proposal.targets){line('原条目：'+row.text);const yes=document.createElement('button');yes.type='button';yes.textContent='替换这条记忆';yes.onclick=()=>apply('resolve',row.id);box.append(yes)}
+ const no=document.createElement('button');no.type='button';no.textContent='取消记忆操作';no.onclick=()=>apply('cancel');box.append(no);
+}
+const {offerCalendarRecovery,renderCalendarRecovery,renderCalendarEvents,renderSelectedEdit,renderCalendarUpdateSelection,renderCalendarUpdatePreview,renderCalendarDeletePreview,renderCalendarOffer,renderCalendarPreview}=createCalendarView({answer,get selectedEdit(){return selectedEdit},set selectedEdit(v){selectedEdit=v},get lastCalendarQuery(){return lastCalendarQuery},set lastCalendarQuery(v){lastCalendarQuery=v},get epoch(){return epoch},set epoch(v){epoch=v},get active(){return active},set active(v){active=v},get sid(){return sid},set sid(v){sid=v},web,post,ensureSession:restoreSession,controls,panelEvent,beginState,state,notice,renderAnswer,safeMessage,input});
 window.localFileChatPanel={refreshConfig:refreshWebConfig,stopFor:(id,version)=>{if(active?.id===id&&active?.generation===version)return cancel()},reset:()=>resetButton.click()};
 renderWelcome();
 panelEvent('attached');
@@ -180,4 +112,27 @@ controls(false);restoreSession();
 window.addEventListener('focus',restoreSession);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)restoreSession()});
 LocalFileChatInputGuard.install(input,document.querySelector('form'),{enterSends:true});
-</script></html>
+
+
+function modelLabel(){const name=selectedProvider==='deepseek'?(modelInfo?.model||'deepseek-flash'):(modelInfo?.local_model||'Qwen');const short=selectedProvider==='deepseek'?(name==='deepseek-flash'?'Flash':name):'Qwen';document.querySelector('#model').title='当前模型：'+name+'；点击打开模型与记忆设置';document.querySelector('#model').textContent=short;}
+function applyModel(info){PersonaView.set(info.persona);try{sessionStorage.setItem('bubble-resume-hint',JSON.stringify({provider:info.provider,controls:info.data_controls||{},requires_grant:!!info.grant||!!info.legacy_budget_retained}))}catch{};modelInfo=info;selectedProvider=info.provider||'ollama';modelLabel();refreshWebConfig();}
+document.querySelector('#model').onclick=async()=>{
+ if(active||!sid)return;const at=epoch;const nodes=[...answer.childNodes];
+ try{
+  const info=await post('/api/bubble/model',{session_id:sid,action:'status'});if(at!==epoch||active)return;applyModel(info);
+  answer.replaceChildren();const box=document.createElement('section');box.className='cloud-consent';box.dataset.cloudConsent='true';answer.append(box);
+  const line=t=>{const p=document.createElement('p');p.textContent=t;box.append(p);return p;};const button=(t,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=t;b.onclick=fn;box.append(b);return b;};
+  line('当前：'+(info.provider==='deepseek'?'DeepSeek '+info.model:'本地 Qwen'));line('普通聊天可直接发送当前问题和必要的本会话历史。文件正文按具体文件确认，日历操作仍需确认；长期记忆按许可使用。');
+  line(info.configured&&info.enabled?'已配置；查看方案不会发送云端请求。':'未配置或后端出站关闭：请先按文档配置；保持本地可用。');
+  const back=async()=>{box.querySelectorAll('button').forEach(b=>b.disabled=true);await post('/api/bubble/model',{session_id:sid,action:'cancel_preview'});if(at===epoch&&!active)answer.replaceChildren(...nodes);};
+  button('继续本地',async()=>{const r=await post('/api/bubble/model',{session_id:sid,action:'select',provider:'ollama'});if(at!==epoch||active)return;epoch++;selectedEdit=null;applyModel(r);answer.replaceChildren(...nodes);refreshWebConfig();});
+  if(info.daily_chat_enabled)button('使用DeepSeek聊天',async()=>{const r=await post('/api/bubble/model',{session_id:sid,action:'select',provider:'deepseek'});if(at!==epoch||active)return;epoch++;applyModel(r);answer.replaceChildren(...nodes);});
+  button('查看用量',async()=>{try{const u=await post('/api/bubble/model',{session_id:sid,action:'usage'});line('本机记录 '+u.requests+' 次；估算 ¥'+(u.estimated_microcny/1000000).toFixed(4)+'；用量待核对 '+u.unknown_usage+' 次。'+u.note);}catch(e){line(safeMessage(e.message));}});
+  button('记忆管理',()=>{if(at!==epoch||active)return;answer.replaceChildren(...nodes);showMemory();});
+  button('取消',back);
+  DailyDataSettings.render(box,info,async controls=>{const r=await post('/api/bubble/model',{session_id:sid,action:'data_controls',controls});if(at!==epoch||active)throw Error('请求已失效');selectedEdit=null;applyModel(r);},async enabled=>{const r=await post('/api/bubble/model',{session_id:sid,action:'persona',enabled});if(at!==epoch||active)throw Error('请求已失效');applyModel(r);},(action,args={})=>post('/api/bubble/reminders',{session_id:sid,action,...args}));
+ }catch(e){if(at===epoch&&!active)notice(safeMessage(e.message));}
+};
+
+LocalSpeechView.install({input,send,reset:resetButton,get sid(){return sid},get epoch(){return epoch},busy:()=>!!active,ensure:restoreSession,post});
+</script><script src="/shared-reminder.js"></script></html>

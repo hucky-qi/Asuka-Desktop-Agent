@@ -235,6 +235,8 @@ final class PetView: NSView {
         let quit = NSMenuItem(title: "退出悬浮助手", action: #selector(quitPet), keyEquivalent: "")
         quit.target = self
         menu.addItem(quit)
+        DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("local.filechat.reminder.menu.begin"),object:nil)
+        defer {DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("local.filechat.reminder.menu.end"),object:nil)}
         menu.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
     }
 }
@@ -285,18 +287,97 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
     }
 
+    private var reminderPresented=false,reminderHidden=false,reminderRestoreVisible=false,reminderForcedChat=false
+    private var reminderSuppressCompletion=false
+    private var reminderLatestIntent:Bool?
+    private var reminderRows=[[String:Any]](),reminderReceiptIDs=Set<String>(),reminderReadPending=false
+    private var reminderSnapshotHash:Data?
+    private let reminderIO=DispatchQueue(label:"local.filechat.pet.reminder")
+    private var reminderRoot:URL {URL(fileURLWithPath:CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent(".runtime/reminder-ipc")}
+    private func trustedReminder(_ r:[String:Any])->Bool {
+        guard let id=r["id"] as? String,id.count==64,id.allSatisfy({$0.isHexDigit}),let delivery=r["delivery_id"] as? String,delivery.count==32,delivery.allSatisfy({$0.isHexDigit}),let v=r["version"] as? Int else{return false}
+        let file=reminderRoot.deletingLastPathComponent().appendingPathComponent(r["synthetic"] as? Bool==true ? "reminder-tests/plans.json":"calendar-reminders/plans.json")
+        guard let raw=try? Data(contentsOf:file),let d=(try? JSONSerialization.jsonObject(with:raw)) as? [String:Any],let items=d["items"] as? [String:[String:Any]],let row=items[id],row["version"] as? Int==v,row["delivery_id"] as? String==delivery,
+              ["claimed","system_accepted","system_visible","user_viewed"].contains(row["status"] as? String ?? ""),let text=row["start"] as? String,let start=ISO8601DateFormatter().date(from:text),start>Date() else{return false}
+        return true
+    }
+    private func pollSharedReminders(){
+        guard bubbleMode,!reminderReadPending else{return};reminderReadPending=true
+        let root=reminderRoot,ops=reminderReceiptIDs
+        reminderIO.async { [weak self] in
+            guard let self else{return};var d:[String:Any]=["protocol":2,"rows":[[String:Any]](),"focus":""]
+            if let raw=try? Data(contentsOf:root.appendingPathComponent("shared-presentation.json")),raw.count<262144,let q=(try? JSONSerialization.jsonObject(with:raw)) as? [String:Any],let at=q["at"] as? Double,abs(Date().timeIntervalSince1970-at)<5,let rows=q["rows"] as? [[String:Any]],rows.count<=256 {d=q;d["rows"]=rows.filter{self.trustedReminder($0)}}
+            var receipts=[String:Any]()
+            for op in ops {if let raw=try? Data(contentsOf:root.appendingPathComponent(op+".action.result.json")),raw.count<8192,let r=try? JSONSerialization.jsonObject(with:raw){receipts[op]=r}}
+            d["receipts"]=receipts
+            DispatchQueue.main.async {
+                self.reminderReadPending=false;self.reminderRows=d["rows"] as? [[String:Any]] ?? []
+                if self.reminderRows.isEmpty && !self.reminderPresented{return}
+                self.ensureChatWindow()
+                // Timestamp is a liveness check, not a presentation change.
+                var display=d;display.removeValue(forKey:"at");display.removeValue(forKey:"pid")
+                guard let payload=try? JSONSerialization.data(withJSONObject:display,options:.sortedKeys),payload != self.reminderSnapshotHash,let json=String(data:payload,encoding:.utf8) else{return}
+                self.webView?.evaluateJavaScript("!!window.localFileChatSharedReminderReady") { ready,error in
+                    guard error==nil,ready as? Bool==true else{return}
+                    self.webView?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('native-reminder-snapshot',{detail:"+json+"}))") { _,error in if error==nil{self.reminderSnapshotHash=payload} }
+                }
+            }
+        }
+    }
+    private func reminderMessage(_ data:[String:Any],_ kind:String){
+        if kind=="reminder_show" {
+            guard !reminderRows.isEmpty else{return}
+            if !reminderPresented {reminderRestoreVisible=chatWindow?.isVisible ?? false;reminderLatestIntent=nil;reminderHidden=false}
+            reminderPresented=true;focusOnReveal=false;reconcilePanel();return
+        }
+        if kind=="reminder_end" {
+            guard reminderPresented else{return}
+            let explicit=data["explicit"] as? Bool==true
+            visibility.requested=explicit || (reminderLatestIntent ?? reminderRestoreVisible)
+            reminderForcedChat=visibility.requested;reminderSuppressCompletion = !visibility.requested;reminderPresented=false;reminderHidden=false
+            focusOnReveal=false;reconcilePanel();return
+        }
+        guard kind=="reminder_action" || kind=="reminder_reconcile",let op=data["operation_id"] as? String,op.count==32,op.allSatisfy({$0.isHexDigit}) else{return}
+        if kind=="reminder_reconcile" {if reminderReceiptIDs.count<256{reminderReceiptIDs.insert(op)};pollSharedReminders();return}
+        guard let id=data["id"] as? String,let delivery=data["delivery_id"] as? String,let version=data["version"] as? Int,let row=reminderRows.first(where:{$0["id"] as? String==id && $0["version"] as? Int==version && $0["delivery_id"] as? String==delivery}),["snooze","dismiss"].contains(data["action"] as? String ?? "") else{return}
+        guard reminderReceiptIDs.count<256 || reminderReceiptIDs.contains(op) else{return}
+        reminderReceiptIDs.insert(op);let root=reminderRoot
+        reminderIO.async {
+            guard self.trustedReminder(row) else{
+                let failed:[String:Any]=["status":"failed","message":"提醒已变化，旧操作无效。"]
+                if let raw=try? JSONSerialization.data(withJSONObject:failed){try? raw.write(to:root.appendingPathComponent(op+".action.result.json"),options:.atomic)}
+                return
+            }
+            var q=data;q.removeValue(forKey:"page_id");q.removeValue(forKey:"kind")
+            let file=root.appendingPathComponent(op+".action.json")
+            // Never overwrite an existing operation, including after lost replies.
+            guard !FileManager.default.fileExists(atPath:file.path),let raw=try? JSONSerialization.data(withJSONObject:q) else{return}
+            let temporary=root.appendingPathComponent(op+".action.pending")
+            do {try raw.write(to:temporary,options:.atomic);try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:temporary.path);try FileManager.default.linkItem(at:temporary,to:file);try FileManager.default.removeItem(at:temporary)} catch {return}
+            try? FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
+        }
+    }
     func reconcilePanel() {
         presentationVersion += 1
         let version = presentationVersion
-        waitingMode = visibility.mode
-        if !visibility.visible { chatWindow?.orderOut(nil) }
+        waitingMode = (reminderPresented || reminderForcedChat) ? "none":visibility.mode
+        let wantsPanel = reminderPresented ? !reminderHidden : (reminderForcedChat || (!reminderSuppressCompletion && visibility.visible))
+        if !wantsPanel { hideChatForState() }
         let state = visibility.busy ? (assistantState == "searching" ? "searching" : "generating") : (assistantState == "complete" ? "complete" : "idle")
-        let script = "window.localFileChatLive2D?.setTaskState('\(state)','\(waitingMode)')"
+        // PRESENTATION_ACK_BEGIN
+        let script = """
+        (() => {
+          window.localFileChatLive2D?.setTaskState('\(state)','\(waitingMode)');
+          const indicator=document.querySelector('#searchBubble');
+          return {visible: !!indicator && !indicator.hidden};
+        })()
+        """
+        // PRESENTATION_ACK_END
         let finish: (Any?, Error?) -> Void = { [weak self] result, error in
             guard let self, version == self.presentationVersion else { return }
             let indicatorVisible = (result as? [String: Any])?["visible"] as? Bool ?? false
             // Reveal only after the model page acknowledged removal of waiting.
-            if self.visibility.visible && self.waitingMode == "none" && !indicatorVisible && error == nil && (self.petBrowser == nil || result is [String: Any]) {
+            if wantsPanel && self.waitingMode == "none" && !indicatorVisible && error == nil && (self.petBrowser == nil || result is [String: Any]) {
                 self.ensureChatWindow()
                 self.positionBubble()
                 self.refreshBubbleConfig()
@@ -305,7 +386,7 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             }
             let panelVisible = self.chatWindow?.isVisible ?? false
             let exclusive = !(panelVisible && indicatorVisible)
-            if !exclusive { self.chatWindow?.orderOut(nil) }
+            if !exclusive { self.hideChatForState() }
             print("Panel presentation: version=\(version) panel=\(self.chatWindow?.isVisible ?? false) indicator=\(indicatorVisible) waiting=\(self.waitingMode) exclusive=\(exclusive)"); fflush(stdout)
         }
         if let browser = petBrowser { browser.evaluateJavaScript(script, completionHandler: finish) }
@@ -313,7 +394,16 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     }
 
 
+    private var lastReminderPresentation=Date.distantPast
+    func publishReminderPresentation(force:Bool=false){
+        guard Date().timeIntervalSince(lastReminderPresentation)>(force ? 0.05:0.5),let panel,let screen=panel.screen ?? NSScreen.main else{return}
+        lastReminderPresentation=Date();let r=panel.convertToScreen(visibleBody),b=screen.visibleFrame
+        let d:[String:Any]=["at":Date().timeIntervalSince1970,"pid":ProcessInfo.processInfo.processIdentifier,"avatar":[r.minX,r.minY,r.width,r.height],"screen":[b.minX,b.minY,b.width,b.height],"chat_visible":chatWindow?.isVisible ?? false,"chat_rect":[chatWindow?.frame.minX ?? 0,chatWindow?.frame.minY ?? 0,chatWindow?.frame.width ?? 0,chatWindow?.frame.height ?? 0],"busy":visibility.busy]
+        let root=URL(fileURLWithPath:CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent(".runtime/reminder-ipc")
+        if let raw=try? JSONSerialization.data(withJSONObject:d){try? raw.write(to:root.appendingPathComponent("presentation.json"),options:.atomic);DistributedNotificationCenter.default().postNotificationName(NSNotification.Name("local.filechat.reminder.position"),object:nil,userInfo:nil,deliverImmediately:true)}
+    }
     func pollTaskStatus() {
+        publishReminderPresentation();pollSharedReminders()
         guard !taskPollInFlight, let url = chatURL else { return }
         taskPollInFlight = true
         URLSession.shared.dataTask(with: URLRequest(url: url.appendingPathComponent("api/tasks/status"),
@@ -336,7 +426,7 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
                 self.lastTaskSignature = signature
                 self.visibility.rows = snapshot["tasks"] as? [[String: Any]] ?? []
                 self.waitingMode = self.visibility.mode
-                if self.visibility.busy { self.chatWindow?.orderOut(nil) }
+                if self.visibility.busy { self.hideChatForState() }
                 if state != self.assistantState { self.updateAssistantState(state) }
                 self.reconcilePanel()
                 print("Pet activity: state=\(state) waiting=\(waiting) active=\(snapshot["active_count"] ?? 0)"); fflush(stdout)
@@ -394,11 +484,11 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     }
 
     func windowDidMove(_ notification: Notification) {
-        if let moved = notification.object as? NSWindow, moved === panel { positionBubble(); positionWaiting() }
+        if let moved = notification.object as? NSWindow, moved === panel { positionBubble(); positionWaiting();publishReminderPresentation(force:true) }
     }
 
     func windowDidResize(_ notification: Notification) {
-        if let resized = notification.object as? NSWindow, resized === chatWindow { positionBubble() }
+        if let resized = notification.object as? NSWindow, resized === chatWindow { positionBubble();publishReminderPresentation(force:true) }
     }
 
     func updateAssistantState(_ state: String) {
@@ -416,7 +506,7 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             print("Pet assistant state: \(state)"); fflush(stdout)
         }
         // Only a validated enum crosses into the model page; no chat contents are copied.
-        if visibility.busy { chatWindow?.orderOut(nil) }
+        if visibility.busy { hideChatForState() }
     }
 
     func restoreBluePet() {
@@ -490,12 +580,15 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
            let data = message.body as? [String: Any], let kind = data["kind"] as? String,
            let page = data["page_id"] as? String {
             if kind == "attached" && panelPageID == nil { panelPageID = page; return }
-            guard page == panelPageID, let id = data["request_id"] as? String,
+            guard page == panelPageID else{return}
+            if kind.hasPrefix("reminder_"){reminderMessage(data,kind);return}
+            guard let id = data["request_id"] as? String,
                   let version = data["version"] as? Int, id.count <= 64 else { return }
-            if kind == "begin" { if visibility.begin(id, version) { focusOnReveal = false } }
+            if kind == "begin" { if visibility.begin(id, version) { focusOnReveal = false;reminderForcedChat=false;reminderSuppressCompletion=false } }
             else if kind == "reset" { visibility.reset(version) }
             else if kind == "ready" { if visibility.answerReady(id, version) { focusOnReveal = false } }
-            else if ["stopped","error"].contains(kind) { _ = visibility.end(id, version) }
+            else if kind == "error" { if visibility.answerReady(id, version) { focusOnReveal = false } }
+            else if kind == "stopped" { _ = visibility.end(id, version) }
             reconcilePanel(); return
         }
         if message.name == "assistantState", message.webView === webView {
@@ -526,12 +619,21 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         if data["type"] as? String == "error" { restoreBluePet() }
         if data["type"] as? String == "ready" {
             // Warm the existing hidden chat page so its local budget is current before first click.
-            if bubbleMode { ensureChatWindow() }
+            if bubbleMode { ensureChatWindow()
+                for (name,value) in [("local.filechat.reminder.menu.begin",true),("local.filechat.reminder.menu.end",false)] {
+                    _=DistributedNotificationCenter.default().addObserver(forName:NSNotification.Name(name),object:nil,queue:.main){[weak self] _ in self?.webView?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('native-reminder-menu',{detail:"+(value ? "true":"false")+"}))",completionHandler:nil)}
+                }
+                for (name,value) in [(NSMenu.didBeginTrackingNotification,true),(NSMenu.didEndTrackingNotification,false)] {
+                    NotificationCenter.default.addObserver(forName:name,object:nil,queue:.main){[weak self] _ in self?.webView?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('native-reminder-menu',{detail:"+(value ? "true":"false")+"}))",completionHandler:nil)}
+                }
+            }
             updateAssistantState(assistantState); applyWaitingState()
         }
     }
 
     func toggleChatWindow() {
+        if reminderPresented {reminderHidden.toggle();reminderLatestIntent = !reminderHidden;reminderSuppressCompletion=reminderHidden;focusOnReveal = !reminderHidden;reconcilePanel();return}
+        reminderForcedChat=false;reminderSuppressCompletion=false
         visibility.requested.toggle()
         focusOnReveal = visibility.requested
         reconcilePanel()
@@ -597,7 +699,13 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         browser.load(URLRequest(url: url.appendingPathComponent(bubbleMode ? "bubble" : "compact"), timeoutInterval: 15))
     }
 
+    func hideChatForState() {
+        webView?.evaluateJavaScript("window.dispatchEvent(new Event('local-file-chat-hidden'))",completionHandler:nil)
+        chatWindow?.orderOut(nil)
+    }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if sender === chatWindow {if reminderPresented{reminderHidden=true;reminderLatestIntent=false};visibility.requested=false;reminderForcedChat=false;reminderSuppressCompletion=true}
+        webView?.evaluateJavaScript("window.dispatchEvent(new Event('local-file-chat-hidden'))",completionHandler:nil)
         sender.orderOut(nil)
         return false
     }
@@ -619,6 +727,7 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         // A new document has a new page ID and starts its request versions at zero.
         // ANSWER_NAVIGATION_BEGIN
         panelPageID = nil
+        reminderSnapshotHash=nil
         if !visibility.localID.isEmpty { visibility.ignored.insert(visibility.localID) }
         visibility.localID = ""
         visibility.localVersion = 0
@@ -708,7 +817,10 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
            modelURL.scheme == "http", modelURL.host == "127.0.0.1" {
             attachLive2D(modelURL)
         } else {
-            print("Native blue fallback ready"); fflush(stdout)
+            // The bootstrap waits for a real window/event-loop readiness marker.
+            // No SDK/model is required for this native fallback.
+            print("Native blue fallback ready")
+            fflush(stdout)
         }
     }
 }

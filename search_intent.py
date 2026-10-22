@@ -47,10 +47,6 @@ class Constraints:
             size=int(float(value)*{'gb':1024**3,'mb':1024**2,'kb':1024,'b':1,'字节':1}[unit])
             self.bounds['min_size' if relation in ('大于','超过','至少') else 'max_size']=size+(1 if relation in ('大于','超过') else -1 if relation in ('小于','低于') else 0)
         self.topic = next((word for word in settings.SEARCH_SYNONYMS if word in text), None)
-        self.literal = None
-        match = re.search(r'(?:包含|含有)\s*[“"\']?(.+?)[”"\']?\s*(?:的文件|的资料|文件)', question)
-        if match:
-            self.literal = match.group(1).strip(' “”“\'"')
         self.directory = None
         # Quoted folder names and explicit paths are hard boundaries, never hints.
         path = re.search(r'(?:/Users/|~/|(?:desktop|downloads|documents|workspace)/)[^\s“”"\']+', question, re.I)

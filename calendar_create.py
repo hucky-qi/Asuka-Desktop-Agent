@@ -71,11 +71,19 @@ def validate(data,clock):
     return {'title':title.strip(),'start':start.isoformat(),'end':end.isoformat(),'timezone':clock['timezone'],'all_day':all_day,'date_label':label(start)+' → '+label(end),'alarms':[],'warnings':warnings}
 
 def bridge(payload,cancel):return native_context.bridge_request(payload,cancel,timeout=getattr(settings,'CALENDAR_BRIDGE_TIMEOUT',20))
+class CalendarUnavailable(ValueError):
+    def __init__(self,status):
+        self.status=status;super().__init__(native_context.MESSAGES.get(status,'本机日历服务未完成请求。'))
+
 def require_ok(row):
-    if row.get('status')!='ok':raise ValueError(row.get('message') or native_context.MESSAGES.get(row.get('status'),'本机日历不可用；没有创建事件'))
+    if row.get('status')!='ok':raise CalendarUnavailable(row.get('status') if row.get('status') in native_context.MESSAGES else 'unavailable')
 
 def preview(text,provider,cancel):
-    data,clock=extract(text,provider,cancel);event=validate(data,clock)
+    data,clock=extract(text,provider,cancel)
+    return preview_data(data,clock,cancel)
+
+def preview_data(data,clock,cancel):
+    event=validate(data,clock)
     if event is None:return None
     catalog=bridge({'action':'catalog','event':event},cancel)
     calendars=catalog.get('calendars',[]) if catalog.get('status')=='ok' else []
@@ -139,6 +147,14 @@ def action(body,c,session_id,cancel=False):
             except (ValueError,TypeError,KeyError):matches=False
             if not matches:result={'status':'uncertain','message':'读回结果与确认预览不一致，未宣称成功；请核对原操作，不会重新写入'}
         if result.get('status') in ('timeout','unavailable'):result={'status':'uncertain','message':'写入结果尚不确定；再次核对只读取原操作，不会再次写入'}
+        if not reconcile and result.get('status') in ('authorization_required','denied','revoked','restricted','write_only'):
+            # Native entry rejected before EventKit mutation. Never use this path
+            # for an uncertain/reconcile request that may already have written.
+            p['state']='cancelled';save(p)
+            p=dict(p,id=uuid.uuid4().hex,state='pending',calendars=[],calendar_id=None,
+                   calendar_status=result['status'],message=result.get('message') or native_context.MESSAGES[result['status']])
+            p.pop('result',None);save(p)
+            return {'status':'preview','calendar_preview':public(p)}
         p['state']=result.get('status','uncertain');p['result']=result;save(p)
     return result
 
@@ -152,17 +168,21 @@ def revise(body,c,sid):
         return {'status':'preview','calendar_preview':public(p)}
 
 def refresh(body,c,sid):
+    # Each retry asks the existing native bridge for CURRENT status. No denial cache,
+    # no inference call, no create/reconcile. Epoch guards cover correction/reset.
     with LOCK:
         p=load(body.get('preview_id'),sid)
-        if p['state']!='pending' or p['epoch']!=c.epoch:raise ValueError('预览已失效，请重新提交')
+        if c.request or p['state']!='pending' or p['epoch']!=c.epoch:raise ValueError('预览已失效或任务处理中，请使用当前预览')
         epoch=p['epoch'];event={k:p[k] for k in ('title','start','end','timezone','all_day','alarms')}
     row=bridge({'action':'catalog','event':event},threading.Event())
     with LOCK:
         old=load(p['id'],sid)
         if old['state']!='pending' or c.epoch!=epoch:raise ValueError('刷新期间预览已失效，未写入')
-        require_ok(row)
-        calendars=row.get('calendars',[])
-        if not calendars:raise ValueError('仍无可写日历，未创建')
+        calendars=row.get('calendars',[]) if row.get('status')=='ok' else []
+        status='ready' if calendars else row.get('status') if row.get('status')!='ok' else 'no_writable_calendar'
         old['state']='cancelled';save(old)
-        p.update(id=uuid.uuid4().hex,calendars=calendars,calendar_status='ready',message='',calendar_id=next((x['id'] for x in calendars if x.get('default')),calendars[0]['id']),duplicates=row.get('duplicates',[]))
+        p.update(id=uuid.uuid4().hex,calendars=calendars,calendar_status=status,
+                 message='' if calendars else row.get('message') or native_context.MESSAGES.get(status,'没有可写日历；尚未创建'),
+                 calendar_id=next((x['id'] for x in calendars if x.get('default')),calendars[0]['id']) if calendars else None,
+                 duplicates=row.get('duplicates',[]))
         save(p);return {'status':'preview','calendar_preview':public(p)}

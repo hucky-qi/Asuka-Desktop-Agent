@@ -33,7 +33,7 @@ def parse_intent(text,provider,cancel,previous=None,references=None):
     # An unqualified date denotes the full local day. Missing/whole-day aliases
     # may normalize only when the user did not specify a narrower time range.
     explicit_time=re.search(r'上午|下午|早上|晚上|傍晚|凌晨|中午|清晨|[0-9一二三四五六七八九十]+点|\d{1,2}[:：]\d{2}|morning|afternoon|evening|before|after|之前|之后|之间',text,re.I)
-    if period in (None,'','all','all_day','full_day','whole_day','全天','整天') and not explicit_time:data['period']='day'
+    if period in (None,'','none','null','all','all_day','full_day','whole_day','全天','整天') and not explicit_time:data['period']='day'
     if data.get('period') not in ('day','morning','afternoon','evening'):
         raise ValueError('请明确日历查询时段')
     if 'date' in data:
@@ -95,7 +95,7 @@ def context(text,provider,cancel,intent=None):
     result=calendar_events(intent,cancel)
     return {'kind':'calendar','clock':clock,'calendar':result}
 
-MESSAGES={'authorization_required':'请在“明日香助手”的系统日历授权窗口允许访问；本次尚未读取日程。','denied':'日历访问被拒绝。可在系统设置→隐私与安全性→日历中调整“明日香助手”；尚未读取日程。','revoked':'此前允许的日历权限已撤销，尚未读取日程。','restricted':'系统限制了日历访问，尚未读取日程。','write_only':'当前仅允许写入，不能读取日历；请在系统设置授权完全访问，本次需完全访问以读取并核对；未写入。','read_error':'本机日历读取失败，没有生成虚构日程。','unavailable':'本机日历服务不可用，尚未读取日程。','timeout':'本机日历服务超时，尚未获得日程。'}
+MESSAGES={'authorization_required':'请在“明日香助手”的系统日历授权窗口允许访问；本次尚未读取日程。','denied':'日历访问被拒绝。可在系统设置→隐私与安全性→日历中调整“明日香助手”；尚未读取日程。','revoked':'系统当前未允许完全访问日历；历史允许记录不代表当前权限。尚未读取日程。','restricted':'系统限制了日历访问，尚未读取日程。','write_only':'当前仅允许写入，不能读取日历；请在系统设置授权完全访问，本次需完全访问以读取并核对；未写入。','read_error':'本机日历读取失败，没有生成虚构日程。','unavailable':'本机日历服务不可用，尚未读取日程。','timeout':'本机日历服务超时，尚未获得日程。'}
 def direct_error(data):
     if data['kind']=='calendar' and data['calendar'].get('status')!='ok':
         row=data['calendar'];return row.get('message') or MESSAGES.get(row.get('status'),'未能读取本机日历，未生成日程。')
@@ -109,7 +109,7 @@ def calendar_list(data):
         try:
             start=datetime.datetime.fromisoformat(e['start']).astimezone(zone);end=datetime.datetime.fromisoformat(e['end']).astimezone(zone)
             if end<=start:raise ValueError()
-            events.append({'title':str(e.get('title','无标题'))[:200],'start':start.isoformat(),'end':end.isoformat(),'all_day':e.get('all_day') is True,'calendar_title':str(e.get('calendar_title',''))[:100],'calendar_id':e.get('calendar_id'),'event_id':e.get('event_id')})
+            events.append({'title':str(e.get('title','无标题'))[:200],'start':start.isoformat(),'end':end.isoformat(),'all_day':e.get('all_day') is True,'calendar_title':str(e.get('calendar_title',''))[:100],'calendar_id':e.get('calendar_id'),'event_id':e.get('event_id'),'version':e.get('version')})
         except (ValueError,KeyError,TypeError):raise ValueError('日历返回了无效起止时间，不能当成无安排') from None
     start=row.get('start');end=row.get('end');total=row.get('total',len(events))
     if type(total)!=int or total<len(events):raise ValueError('日历事件计数无效')

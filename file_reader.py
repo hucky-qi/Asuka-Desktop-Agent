@@ -45,7 +45,7 @@ def ocr_text(path, page=None):
     return result.stdout.strip()[:180_000]
 
 
-def extract_sections(path):
+def extract_sections(path, allow_ocr=True):
     """Return (page number or None, text) while preserving PDF references."""
     file = checked_file(path)
     if file.suffix.lower() not in settings.CONTENT_EXTENSIONS:
@@ -57,6 +57,7 @@ def extract_sections(path):
     if file.stat().st_size > maximum:
         raise ValueError(f"文件过大，超过当前读取上限 {maximum // (1024 * 1024)} MB")
     if file.suffix.lower() in settings.IMAGE_EXTENSIONS:
+        if not allow_ocr:raise ValueError("此流程未启用图片OCR")
         return [(None, ocr_text(file))]
     if file.suffix.lower() == ".pdf":
         try:
@@ -64,7 +65,10 @@ def extract_sections(path):
         except ImportError as exc:
             raise RuntimeError("请先安装 requirements.txt 中的 pypdf") from exc
         try:
-            reader = PdfReader(file)
+            if not allow_ocr:
+                with file.open("rb") as header:
+                    if header.read(5)!=b"%PDF-":raise ValueError("PDF 文件格式无效或已损坏")
+            reader = PdfReader(file,strict=not allow_ocr)
             if reader.is_encrypted:
                 raise ValueError("暂不支持加密 PDF")
             sections = []
@@ -72,7 +76,7 @@ def extract_sections(path):
             for number, page in enumerate(reader.pages[:settings.MAX_PDF_PAGES], 1):
                 check_cancelled()
                 content = (page.extract_text() or "").strip()
-                if not content:
+                if not content and allow_ocr:
                     content = ocr_text(file, number)
                 if remaining <= 0:
                     break
@@ -112,9 +116,9 @@ def extract_text(path):
     return "\n".join(text for _, text in extract_sections(path))
 
 
-def document_chunks(path):
+def document_chunks(path, allow_ocr=True):
     position = 0
-    for page, content in extract_sections(path):
+    for page, content in extract_sections(path, allow_ocr=allow_ocr):
         for offset, piece in chunks(content):
             if piece.strip():
                 yield position + offset, piece, page

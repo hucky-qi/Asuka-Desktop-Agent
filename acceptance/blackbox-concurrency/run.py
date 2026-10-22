@@ -96,7 +96,12 @@ class Dependencies(BaseHTTPRequestHandler):
    return self.reply({'model':'qwen3-embedding:0.6b','embeddings':[[1.0,0.0,0.0] for _ in values]})
   if self.path=='/api/chat':
    messages=data.get('messages',[]);question=next((m.get('content','') for m in reversed(messages) if m.get('role')=='user'),'');history='\n'.join(m.get('content','') for m in messages)
-   if '只输出JSON' in history:
+   if 'WEB_SUMMARY_V1' in history:
+    src=json.loads(question)['sources'][0]
+    answer=json.dumps({'found':True,'claims':[{'text':src['snippet'],'citations':[{'id':src['id'],'quote':src['snippet'][:160]}]}],'missing':''},ensure_ascii=False)
+   elif 'UNIFIED_UNDERSTANDING_V1' in history:
+    answer=json.dumps({'route':'chat','file':None,'reply':''})
+   elif '只输出JSON' in history:
     answer=json.dumps({'kind':'clock' if '几点' in question else 'calendar' if '安排' in question else 'none','day_offset':1 if '明天' in question else 0,'period':'morning' if '上午' in question else 'day','operation':'read'})
    elif '安排' in question:answer='日历中没有已有安排。'
    elif '测试昵称是' in question:answer='已收到你的测试昵称。'
@@ -143,8 +148,19 @@ class Suite:
   self.rows.append(row);self.save();print(name,row['status'],row.get('error',''),flush=True)
   if self.fail_fast and row['status']!='PASS':raise RuntimeError('Blackbox fail-stop; first failure preserved in results')
  def save(self):self.out.write_text(json.dumps({'mode':'real_local_models' if self.real else 'isolated_http_dependencies','expectations_sha256':hashlib.sha256((R/'EXPECTATIONS.json').read_bytes()).hexdigest(),'results':self.rows},ensure_ascii=False,indent=2))
- def chat(self,q,session=None):return Stream(self.base,'/api/bubble/chat',{'question':q,'session_id':session,'web_enabled':False}).start()
- def files(self,q,session=None,scope='workspace'):return Stream(self.base,'/api/chat',{'question':q,'session_id':session,'scope':scope,'stream':True}).start()
+ def chat(self,q,session=None):
+  # Current public HTTP contract initializes explicitly. This offline legacy
+  # Qwen fixture selects local mode; it must not inherit daily cloud defaults.
+  if not session:
+   session=request(self.base,'/api/bubble/session',{})['session_id']
+   request(self.base,'/api/bubble/model',{'session_id':session,'action':'select','provider':'ollama'})
+  return Stream(self.base,'/api/bubble/chat',{'question':q,'session_id':session,'web_enabled':False}).start()
+ def files(self,q,session=None,scope='workspace'):
+  # The legacy content lane is available only to an explicitly local web session.
+  if not session:
+   session=request(self.base,'/api/assistant/session',{})['session_id']
+   request(self.base,'/api/assistant/model',{'session_id':session,'action':'select','provider':'ollama'})
+  return Stream(self.base,'/api/chat',{'question':q,'session_id':session,'scope':scope,'stream':True}).start()
  def run(self):
   def health():
    d=request(self.base,'/api/health');assert d.get('service')=='local-file-chat';return {'service':d['service']}
@@ -185,7 +201,8 @@ class Suite:
   self.test('cancel_chat_preserves_file_task',lambda:concurrent(cancel=True))
   if not self.real:self.test('reset_chat_preserves_file_task',lambda:concurrent(reset=True))
   def constraints():
-   data=request(self.base,'/api/files/search',{'scope':'workspace','keyword':'野餐清单','extensions':['pdf']});events=data.get('events',[]);assert events,'no public file event'
+   sid=request(self.base,'/api/assistant/session',{})['session_id'];request(self.base,'/api/assistant/model',{'session_id':sid,'action':'select','provider':'ollama'})
+   data=request(self.base,'/api/files/search',{'session_id':sid,'scope':'workspace','keyword':'野餐清单','extensions':['pdf']});events=data.get('events',[]);assert events,'no public file event'
    rows=[r for e in events for r in e.get('results',[])];assert rows,'known fixture was lost';assert all(Path(r['path']).suffix.lower()=='.pdf' for r in rows),'hard type leaked'
    assert all('/fixtures/' in r['path'] for r in rows),'scope leaked'
    e=events[-1];counts=e.get('counts',{});assert counts.get('displayed')==len(rows),'display count inconsistent';assert counts.get('verified',-1)>=len(rows),'verified count inconsistent'
@@ -245,7 +262,9 @@ def extra_files(suite):
 def web_budget(suite):
  base=suite.base
  def count():return len([c for c in Dependencies.calls if c['path']=='/web_search'])
- def web(q):return Stream(base,'/api/bubble/chat',{'question':q,'web_enabled':True}).start()
+ def web(q):
+  sid=request(base,'/api/bubble/session',{})['session_id'];request(base,'/api/bubble/model',{'session_id':sid,'action':'select','provider':'ollama'})
+  return Stream(base,'/api/bubble/chat',{'question':q,'session_id':sid,'web_enabled':True}).start()
  initial=request(base,'/api/bubble/config')['usage'];assert count()==0,'unchecked local requests leaked external searches';assert initial['used']==1 and initial['test_used']==7
  # One real application request to a loopback simulated external endpoint.
  before=count();a=web('搜索公开测试花园开放年份').wait();assert count()==before+1,'not exactly one outbound transport'

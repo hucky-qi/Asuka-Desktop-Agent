@@ -368,7 +368,7 @@ def listing_reply(event):
 def model_call(stage, **kwargs):
     with diagnostics.span(stage, "generating"):
         try:
-            response=chat(cancel=getattr(file_tools._current_search,'cancel_event',None),**kwargs)
+            response=(model_providers.CURRENT.get() or chat)(cancel=getattr(file_tools._current_search,'cancel_event',None),**kwargs)
         except __import__('model_dispatch').Cancelled:
             raise file_tools.SearchCancelled() from None
     trace=getattr(diagnostics.local,'trace',None)
@@ -378,12 +378,13 @@ def model_call(stage, **kwargs):
     return response
 
 
-def answer(question, state, search_scope="all", fast=False):
+def answer(question, state, search_scope="all", fast=False, allowed_tools=None, hard_directory=None, discovery=False, context_messages=None, provided_plan=None):
     """Keep structured state in Python; LLM chooses tools and phrases answers."""
     file_tools.check_cancelled()
     tool_errors = []
     with diagnostics.span("condition_extraction"):
         constraints = search_intent.Constraints(question, search_scope)
+        if hard_directory is not None:constraints.directory=hard_directory
     def validate_event(event):
         search_snapshot(state, event, fresh=event.get('tool') not in ('filter_results','sort_results'))
         constraints.check_event(event)
@@ -421,8 +422,6 @@ def answer(question, state, search_scope="all", fast=False):
             limit: Number of results to display, at most 20.
         """
         keyword, extensions = filename_intent(keyword, extensions)
-        if constraints.literal:
-            return search_file_content(constraints.literal, scope, extensions, limit, directory)
         params = dict(keyword=keyword, scope=scoped(scope, directory), extensions=extensions,
                       modified_after=modified_after, modified_before=modified_before,
                       min_size=min_size, max_size=max_size, sort_by=sort_by, limit=limit)
@@ -431,6 +430,14 @@ def answer(question, state, search_scope="all", fast=False):
         if constraints.media_topic():params['topic']=constraints.media_topic()
         with diagnostics.span("file_retrieval", "searching"):
             data = search_retrieval.find_files(**params)
+        # The validated unified contract uses find_files for names/IDs. Keep
+        # hybrid ranking/embedding, but body-only candidates cannot satisfy it.
+        if provided_plan and provided_plan[0]=='find_files' and keyword and data.get('retrieval',{}).get('mode')=='hybrid':
+            results=data['results']
+            data['results']=[item for item in results if 'name' in item.get('candidate_sources',[])]
+            data['total']=len(data['results'])
+            if len(results)!=len(data['results']):
+                data['note']=(data.get('note','')+'\n名称条件已保留；仅正文相关而无名称/目录依据的候选未展示。').strip()
         constraints.accept_semantic_evidence(data.pop('_retrieval_evidence', ()))
         constraints.check_event({"scope":params["scope"],"results":data["results"]})
         state.last_search_query = params
@@ -448,7 +455,8 @@ def answer(question, state, search_scope="all", fast=False):
 
     def filter_results(extensions: list[str] | None = None, modified_after: str | None = None,
                        modified_before: str | None = None, min_size: int | None = None,
-                       max_size: int | None = None, sort_by: str | None = None) -> dict:
+                       max_size: int | None = None, sort_by: str | None = None,
+                       clear_fields: list[str] | None = None) -> dict:
         """Filter the previous search result set; do not search for the filter words as filenames.
 
         Args:
@@ -461,6 +469,13 @@ def answer(question, state, search_scope="all", fast=False):
         """
         if not state.last_search_query:
             raise ValueError("请先搜索文件")
+        clear_fields = clear_fields or []
+        mutable={'extensions','modified_after','modified_before','min_size','max_size','sort_by'}
+        if not isinstance(clear_fields,list) or any(k not in mutable for k in clear_fields):
+            raise ValueError("只能清除明确的后续筛选条件，原搜索硬约束保持不变")
+        if any(k!='sort_by' and k in state.last_search_query and state.last_search_query[k] is not None for k in clear_fields):
+            raise ValueError("该条件属于原搜索范围；请发起新的搜索，旧结果保持不变")
+        for key in clear_fields:state.filters.pop(key,None)
         _, extensions = constraints.filename("", extensions)
         updates = constraints.metadata({key: value for key, value in dict(
             extensions=extensions, modified_after=modified_after, modified_before=modified_before,
@@ -529,7 +544,6 @@ def answer(question, state, search_scope="all", fast=False):
             limit: Number of results, at most 20.
         """
         scope = scoped(scope, directory)
-        keyword = constraints.literal or keyword
         _, extensions = constraints.filename("", extensions)
         def partial_cards(data):
             constraints.accept_semantic_evidence(data.pop('_retrieval_evidence', ()))
@@ -585,8 +599,6 @@ def answer(question, state, search_scope="all", fast=False):
             extensions: Optional file types such as ["pdf", "docx"].
             limit: Number of results to display, at most 20.
         """
-        if constraints.literal:
-            return search_file_content(constraints.literal, scope, extensions, limit, directory)
         scope = scoped(scope, directory)
         query, extensions = filename_intent(query, extensions)
         if constraints.media:
@@ -627,12 +639,14 @@ def answer(question, state, search_scope="all", fast=False):
         reveal_in_finder, read_file, search_file_content, semantic_search_files,
         find_similar_files, find_duplicate_files,
     )}
+    if allowed_tools is not None:tools={k:v for k,v in tools.items() if k in allowed_tools}
     def execute_tool(name, args):
+        if name not in tools:raise ValueError("当前工具入口不允许该操作，请在完整文件助手明确操作")
         trace=getattr(diagnostics.local,"trace",None)
         if trace:trace.tool_calls += 1
         with diagnostics.span("tool_execution", "searching"):
             return tools[name](**args)
-    plan = search_intent.fast_plan(question, bool(state.last_search_query)) if fast else None
+    plan = provided_plan or (search_intent.fast_plan(question, bool(state.last_search_query)) if fast else None)
     if plan:
         name, args = plan
         try:
@@ -654,7 +668,7 @@ def answer(question, state, search_scope="all", fast=False):
     # file-operation tool and a second model call for a discarded listing.
     # Followups/file QA retain the full structured-state/tool path below.
     first_response = None
-    if fast and not state.last_search_query and not re.search(r'时间|日期|大小|大于|小于|最近|之前|之后|before|after|size|modified|larger|smaller|读取|打开|定位|讲什么|写了什么|总结',question,re.I) and re.search(r'找|查找|搜索|寻找|\bsearch\b|\bfind\b',question,re.I):
+    if fast and (discovery or (not state.last_search_query and not re.search(r'时间|日期|大小|大于|小于|最近|之前|之后|before|after|size|modified|larger|smaller|读取|打开|定位|讲什么|写了什么|总结',question,re.I) and re.search(r'找|查找|搜索|寻找|\bsearch\b|\bfind\b',question,re.I))):
         intent_schema={"type":"object","properties":{
             "method":{"type":"string","enum":["find_files","semantic_search_files","search_file_content"]},
             "query":{"type":"string"},"directory":{"type":["string","null"]},
@@ -702,7 +716,7 @@ def answer(question, state, search_scope="all", fast=False):
               "工具处理路径和排序，你只提取参数并描述真实返回的结果。不能编造文件或内容。"
               "针对 PDF 回答时标明工具片段中的页码，没有页码时不猜测。"
               "结果可能被截断；如没有抽取到相关段落，请说明局限。用简短中文回答。")
-    messages = [{"role": "system", "content": system}, *state.history[-6:],
+    messages = [{"role": "system", "content": system}, *(context_messages or []), *state.history[-6:],
                 {"role": "user", "content": question}]
     summary = {"last_search_query": state.last_search_query,
                "current_result_count": len(state.current_filtered_results),
@@ -782,6 +796,9 @@ def structured_search(body, state):
         return search_snapshot(state, {'tool':'find_files','scope':params.get('scope','all'),**data})
 
 
+import assistant_files
+assistant_files.bind(session=Session,answer=answer,snapshot=search_snapshot,visible=visible,clone=fork_session,session_for=session_for,sessions=SESSIONS,lock=SESSIONS_LOCK)
+
 HTML = r'''<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>本地文件助手</title>
@@ -817,9 +834,9 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 <section class="settings-card saved-card" id="savedPanel" aria-label="保存的搜索"><h2>保存的搜索</h2><select id="savedSearches" aria-label="保存的搜索"><option value="">选择保存的搜索</option></select><div class="pair"><button id="saveSearch" class="secondary" type="button">保存当前</button><button id="runSearch" type="button">运行</button></div><button id="removeSearch" class="secondary" type="button">删除所选搜索</button></section>
 <button id="duplicates" type="button" style="border:1px solid #dce6f4;background:#fff;color:#17469f;padding:10px;border-radius:10px;text-align:left">查找重复文件 →</button><button id="stopDuplicates" type="button" hidden>终止重复文件检查</button></aside>
 <section class="chat" aria-label="文件助手"><header class="chat-head"><div><h1>文件助手</h1><p>搜索、阅读并理解你的本地文件</p></div><button id="clearChat" type="button">清空聊天</button></header>
-<form id="fileSearchForm" hidden aria-label="结构化文件搜索"><label>文件名关键词<input id="fileKeyword" maxlength="100" placeholder="例如：简历"></label><label>文件类型<input id="fileTypes" placeholder="例如：pdf,docx"></label><label>修改时间从<input id="fileAfter" type="date"></label><label>至<input id="fileBefore" type="date"></label><label>最小大小（字节）<input id="fileMin" type="number" min="0"></label><label>最大大小（字节）<input id="fileMax" type="number" min="0"></label><label>排序<select id="fileSort"><option value="relevance">相关性</option><option value="modified_desc">最近修改</option><option value="modified_asc">最早修改</option><option value="size_desc">大小降序</option></select></label><button id="fileSearchSubmit" type="submit">搜索文件</button><p>条件不变时筛选当前结果快照；修改关键词或范围后重新搜索。可切回“文件助手”继续打开或问答。</p></form><div id="log"><div class="message bot">你好！试试“帮我找一下简历”，找到后还可以说“只看 PDF”或“打开第一个”。也可以按文件内容搜索与提问。</div></div>
+<form id="fileSearchForm" hidden aria-label="结构化文件搜索"><label>文件名关键词<input id="fileKeyword" maxlength="100" placeholder="例如：简历"></label><label>文件类型<input id="fileTypes" placeholder="例如：pdf,docx"></label><label>修改时间从<input id="fileAfter" type="date"></label><label>至<input id="fileBefore" type="date"></label><label>最小大小（字节）<input id="fileMin" type="number" min="0"></label><label>最大大小（字节）<input id="fileMax" type="number" min="0"></label><label>排序<select id="fileSort"><option value="relevance">相关性</option><option value="modified_desc">最近修改</option><option value="modified_asc">最早修改</option><option value="size_desc">大小降序</option></select></label><button id="fileSearchSubmit" type="submit">搜索文件</button><p>条件不变时筛选当前结果快照；修改关键词或范围后重新搜索。可切回“文件助手”继续打开或问答。</p></form><div id="log"><div class="message bot" data-default-welcome="true">你好！试试“帮我找一下简历”，找到后还可以说“只看 PDF”或“打开第一个”。也可以按文件内容搜索与提问。</div></div>
 <form id="form"><input id="question" autocomplete="off" placeholder="搜索文件，或询问文件内容…" maxlength="4000" required><button id="stopChat" type="button" hidden>终止搜索</button><button id="send">发送</button></form></section>
-<aside class="right" aria-label="搜索与索引状态"><section class="side-card"><h2>当前搜索</h2><p id="searchSummary">搜索后会在这里显示当前结果。</p><div class="summary-row"><span>搜索范围</span><b id="currentScope">全部目录</b></div><div class="summary-row"><span>实际展示 / 已验证</span><b id="resultCount">—</b></div></section><section class="side-card"><h2>索引状态</h2><div id="indexRightStatus" class="index-state"></div><div id="indexSummary" class="index-state">正在读取索引状态</div><details id="indexDetails"><summary>索引技术详情</summary><div id="indexStatus" class="index-state"></div></details></section></aside></main>
+<aside class="right" aria-label="搜索与索引状态"><section class="side-card"><h2>当前搜索</h2><p id="searchSummary">搜索后会在这里显示当前结果。</p><div class="summary-row"><span>搜索范围</span><b id="currentScope">全部目录</b></div><div class="summary-row"><span>实际展示</span><b id="resultCount">—</b></div></section><section class="side-card"><h2>索引状态</h2><div id="indexRightStatus" class="index-state"></div><div id="indexSummary" class="index-state">正在读取索引状态</div><details id="indexDetails"><summary>索引技术详情</summary><div id="indexStatus" class="index-state"></div></details></section></aside></main>
 <dialog id="folderDialog" class="folder-dialog"><form id="folderForm"><h2>添加搜索目录</h2><p>选择一个允许的基础目录，再填写已有的子文件夹。也可以输入完整 Mac 路径。</p><label for="folderBase">基础目录</label><select id="folderBase"><option value="desktop">桌面 Desktop</option><option value="documents">文稿 Documents</option><option value="downloads">下载 Downloads</option><option value="workspace">workspace</option></select><label for="folderPath">子目录名称或路径</label><input id="folderPath" required placeholder="例如 resume 或 项目/resume"><p>将使用类似 <code>desktop/resume</code> 的路径；也接受 <code>/Users/你的用户名/Desktop/resume</code>。</p><label for="folderName">显示名称（可选）</label><input id="folderName" maxlength="40" placeholder="例如 简历"><p id="folderError" class="error" role="alert" hidden></p><div class="dialog-actions"><button id="folderCancel" class="secondary" type="button">取消</button><button id="folderSubmit" type="submit">添加目录</button></div></form></dialog>
 <dialog id="cleanupDialog" class="folder-dialog cleanup-dialog"><h2>确认移入废纸篓</h2><p>请核对保留和移走的文件。确认后，所选文件会进入系统废纸篓。</p><strong>保留</strong><div id="cleanupKeep" class="cleanup-paths"></div><strong>移入废纸篓</strong><div id="cleanupDelete" class="cleanup-paths"></div><div class="dialog-actions"><button id="cleanupCancel" class="secondary" type="button">取消</button><button id="cleanupConfirm" type="button">确认移入废纸篓</button></div></dialog>
 <script src="/input-guard.js"></script>
@@ -979,16 +996,18 @@ async function action(kind,path){
 }
 async function inspect(kind,path){const epoch=viewEpoch;try{const data=await postJSON(kind==='preview'?'/api/preview':'/api/related',{session_id:sessionId,path});if(epoch!==viewEpoch)return;if(kind==='preview'){const box=add('assistant',data.file.name+(data.file.pages?' · 共 '+data.file.pages+' 页':'')+(data.page?' · 预览第 '+data.page+' 页':'')+'\n'+data.excerpt);if(data.thumbnail){const picture=document.createElement('img');picture.src=data.thumbnail;picture.alt=data.file.name+' 预览';picture.style='max-width:100%;max-height:440px;display:block;margin-top:8px';box.appendChild(picture)}}else add('assistant',data.answer,data.events)}catch(error){if(epoch===viewEpoch)add('assistant','操作失败：'+error.message)}}
 function add(role, content, events=[]){
-  const box=document.createElement('div'); box.className='message '+(role==='user'?'me':'bot'); box.textContent=content;
+  const box=document.createElement('div'); box.className='message '+(role==='user'?'me':'bot'); box.textContent=events.some(e=>Array.isArray(e.results))?'':content;
   for(const event of events){
     if(Array.isArray(event.results)){
       const c=event.counts||{candidates:event.total??event.results.length,verified:event.total??event.results.length,displayed:event.results.length};
-      resultCount.textContent=c.displayed+' / '+c.verified+' 个文件';
-      searchSummary.textContent='检索候选 '+c.candidates+' 个；'+(c.verified?'当前快照已验证 '+c.verified+' 个，可继续筛选或打开。':'当前条件下没有可靠匹配。')+(event.partial||event.truncated?' 覆盖不完整，见结果说明。':'');
+      resultCount.textContent=c.displayed+' 个文件';
+      searchSummary.textContent=c.displayed?'结果已列出，可继续筛选或选择。':'当前范围没有可靠匹配。';
       if(event.search_state)currentSearchState=event.search_state;
       if(event.scope){let selected=[...scope.options].find(option=>option.value===event.scope);if(!selected){selected=new Option('当前目录 · '+event.scope,event.scope);selected.dataset.transient='true';scope.add(selected)}currentScope.textContent=selected.textContent;scope.value=event.scope}
     }
-    const note=document.createElement('div');note.className='status';note.textContent='已调用 '+event.tool+(event.total===undefined?'':' · 已验证 '+event.total+' 个 · 展示 '+(event.results||[]).length+' 个')+(event.note?' · '+event.note:'');box.appendChild(note);
+    if(Array.isArray(event.results)&&window.PersonaView){PersonaView.search(box,{files:event.results,counts:event.counts,coverage:event});}
+    else {const note=document.createElement('div');note.className='status';note.textContent='已调用 '+event.tool+(event.note?' · '+event.note:'');box.appendChild(note);}
+
     for(const [position,file] of (event.results||[]).entries()){
       const card=document.createElement('div');card.className='card';
       const name=document.createElement('strong');name.textContent=(position+1)+'. '+file.name;card.appendChild(name);
@@ -1005,7 +1024,7 @@ function add(role, content, events=[]){
   log.appendChild(box);log.scrollTop=log.scrollHeight;return box;
 }
 form.addEventListener('submit', async e=>{
-  e.preventDefault();const question=input.value.trim();if(!question||chatTask||clearingChat)return;
+  e.preventDefault();if(window.unifiedWeb?.handles()){await window.unifiedWeb.submit();return;}const question=input.value.trim();if(!question||chatTask||clearingChat)return;
   input.value='';add('user',question);send.disabled=true;stopChat.hidden=false;const pending=add('assistant','正在思考…');
   const task={id:crypto.randomUUID(),controller:new AbortController(),pending,epoch:viewEpoch};chatTask=task;task.timeout=setTimeout(()=>{if(chatTask===task)stopChat.click()},180000);
   try{
@@ -1045,6 +1064,7 @@ form.addEventListener('submit', async e=>{
   finally{clearTimeout(task.timeout);if(chatTask===task){chatTask=null;send.disabled=false;stopChat.hidden=true;input.focus()}}
 });
 stopChat.addEventListener('click',async()=>{
+  if(window.unifiedWeb?.handles()){await window.unifiedWeb.stop();return;}
   const task=chatTask;if(!task)return;stopChat.disabled=true;taskState('idle',task,1000002);
   try{
     const data=await postJSON('/api/chat/cancel',{request_id:task.id,session_id:sessionId});
@@ -1054,6 +1074,7 @@ stopChat.addEventListener('click',async()=>{
   }catch(error){add('assistant','终止失败：'+error.message)}finally{stopChat.disabled=false}
 });
 document.getElementById('clearChat').addEventListener('click',async event=>{
+  if(window.unifiedWeb?.handles()){await window.unifiedWeb.reset();return;}
   const button=event.currentTarget;button.disabled=true;clearingChat=true;viewEpoch++;send.disabled=true;taskState('idle',chatTask,1000002);
   try{
     const active=chatTask;
@@ -1067,7 +1088,9 @@ document.getElementById('clearChat').addEventListener('click',async event=>{
     send.disabled=false;stopChat.hidden=true;input.value='';input.focus();
   }catch(error){add('assistant','清空失败：'+error.message)}finally{button.disabled=false;clearingChat=false;send.disabled=!!chatTask}
 });
-</script></body></html>'''
+
+(async()=>{const key=new URLSearchParams(location.search).get('file_session');if(!key)return;try{const r=await postJSON('/api/files/current',{session_id:key});sessionId=key;add('assistant',r.answer,[r.event]);}catch(error){add('assistant','文件快照未能恢复：'+error.message)}})();
+</script><script src="/persona-view.js"></script><script src="/calendar-view.js"></script><script src="/file-qa-view.js"></script><script src="/memory-view.js"></script><script src="/daily-settings.js"></script><script src="/speech-view.js"></script><script src="/unified-web.js"></script></body></html>'''
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1091,11 +1114,15 @@ class Handler(BaseHTTPRequestHandler):
             pass  # A cancelled browser fetch may have closed its socket.
 
     def do_GET(self):
+        if self.path=="/reminder-notifications":
+            raw=(settings.PROJECT/"reminder-notifications.html").read_bytes();self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Cache-Control","no-store");self.send_header("Referrer-Policy","no-referrer");self.send_header("Content-Security-Policy","default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'");self.send_header("Content-Length",str(len(raw)));self.end_headers();self.wfile.write(raw);return
+        if self.path in ("/speech-view.js","/persona-view.js","/shared-reminder.js","/daily-settings.js","/unified-web.js","/calendar-view.js","/file-qa-view.js", "/memory-view.js"):
+            raw=(settings.PROJECT/self.path[1:]).read_bytes();self.send_response(200);self.send_header("Content-Type","application/javascript; charset=utf-8");self.send_header("Cache-Control","no-store");self.send_header("Content-Length",str(len(raw)));self.end_headers();self.wfile.write(raw);return
         if self.path == "/input-guard.js":
             raw=(settings.PROJECT/"input-guard.js").read_bytes()
             self.send_response(200);self.send_header("Content-Type","application/javascript; charset=utf-8");self.send_header("Cache-Control","no-store");self.send_header("Content-Length",str(len(raw)));self.end_headers();self.wfile.write(raw);return
         if self.path == "/api/health":
-            self.send_json(200, {"service": "local-file-chat", "project": str(settings.PROJECT), "database": str(settings.SEMANTIC_DB), "model": settings.MODEL, "chat_protocol":2, "provider":"local-default-or-explicit-config"})
+            self.send_json(200, {"service": "local-file-chat", "project": str(settings.PROJECT), "database": str(settings.SEMANTIC_DB), "model": settings.MODEL, "chat_protocol":2, "assistant_protocol":3, "file_qa_protocol":1,"web_summary_protocol":1,"memory_contract_protocol":4, "desktop_model_protocol":1, "provider":"local-default-or-explicit-config"})
             return
         if self.path == "/api/duplicates/status":
             with DUPLICATE_LOCK:
@@ -1115,10 +1142,11 @@ class Handler(BaseHTTPRequestHandler):
             data["scopes"] = preferences.custom_scopes()
             self.send_json(200, data)
             return
-        if self.path not in ("/", "/compact", "/bubble"):
+        page_path=self.path.split("?",1)[0]
+        if page_path not in ("/", "/compact", "/bubble"):
             self.send_error(404)
             return
-        payload = ((settings.PROJECT/'bubble.html').read_text() if self.path=='/bubble' else HTML).encode("utf-8")
+        payload = ((settings.PROJECT/'bubble.html').read_text() if page_path=='/bubble' else HTML).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
@@ -1137,11 +1165,52 @@ class Handler(BaseHTTPRequestHandler):
             raise file_tools.SearchCancelled()
 
     def do_POST(self):
-        if self.path not in ("/api/chat", "/api/action", "/api/index", "/api/preferences",
+        if self.path in ('/api/bubble/speech','/api/assistant/speech'):
+            if self.headers.get('Host')!=f'{settings.HOST}:{settings.PORT}' or self.headers.get('Origin')!=f'http://{settings.HOST}:{settings.PORT}':self.send_json(403,{'error':'语音仅允许本机同源页面主动操作。'});return
+            try:
+                size=int(self.headers.get('Content-Length','0'))
+                if not 0<size<=1024 or self.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError('语音请求格式不正确。')
+                body=json.loads(self.rfile.read(size))
+                if not isinstance(body,dict):raise ValueError('语音请求格式不正确。')
+                import speech_native
+                self.send_json(200,speech_native.handle(body,'assistant' if '/assistant/' in self.path else 'bubble'))
+            except (ValueError,TypeError,KeyError):self.send_json(400,{'error':str(__import__('sys').exc_info()[1])[:250]})
+            except Exception:self.send_json(503,{'error':'本地语音暂不可用，草稿未改动。'})
+            return
+        if self.path in ('/api/bubble/reminders','/api/assistant/reminders'):
+            origin=self.headers.get('Origin')
+            if origin and origin!=f'http://{settings.HOST}:{settings.PORT}':self.send_json(403,{'error':'仅允许同源本地请求'});return
+            try:
+                size=int(self.headers.get('Content-Length','0'))
+                if not 0<size<=8192 or self.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError('提醒请求格式不正确')
+                body=json.loads(self.rfile.read(size))
+                if not isinstance(body,dict):raise ValueError('提醒请求格式不正确')
+                import reminder_api
+                self.send_json(200,reminder_api.handle(body,'assistant' if '/assistant/' in self.path else 'bubble'))
+            except (ValueError,TypeError,KeyError):self.send_json(400,{'error':str(__import__('sys').exc_info()[1])[:250]})
+            except Exception:self.send_json(503,{'error':'本机提醒保存或读取失败；没有宣称已完成。'})
+            return
+
+        if self.path=="/api/notifications/test-channel":
+            if self.headers.get('Host')!=f'{settings.HOST}:{settings.PORT}' or self.headers.get('Origin')!=f'http://{settings.HOST}:{settings.PORT}':self.send_json(403,{'error':'仅允许原应用打开的本地同源验收页。'});return
+            import notification_test_api as channel
+            try:
+                size=int(self.headers.get('Content-Length','0'))
+                if not 0<size<=1024 or self.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError('测试请求格式不正确。')
+                body=json.loads(self.rfile.read(size))
+                if not isinstance(body,dict):raise ValueError('测试请求格式不正确。')
+                self.send_json(200,channel.handle(body,self.headers.get('X-Reminder-Test')))
+            except channel.Refused as e:self.send_json(403,{'error':str(e)})
+            except channel.Limited as e:self.send_json(429,{'error':str(e)})
+            except (ValueError,TypeError):self.send_json(400,{'error':'测试操作未执行，请检查入口和操作。'})
+            except Exception:self.send_json(503,{'error':'通知操作未确认，没有自动重试。'})
+            return
+
+        if not self.path.startswith("/api/assistant/") and self.path not in ("/api/chat", "/api/action", "/api/index", "/api/preferences",
                              "/api/saved-search", "/api/preview", "/api/related", "/api/duplicates",
                              "/api/duplicates/cancel", "/api/duplicates/plan", "/api/duplicates/confirm",
                              "/api/chat/cancel", "/api/chat/clear", "/api/index/cancel",
-                             "/api/bubble/calendar/update/select", "/api/bubble/calendar/update/confirm", "/api/bubble/calendar/update/cancel", "/api/bubble/calendar/offer", "/api/bubble/calendar/more", "/api/bubble/calendar/refresh", "/api/bubble/calendar/confirm", "/api/bubble/calendar/cancel", "/api/bubble/calendar/revise", "/api/bubble/session", "/api/bubble/chat", "/api/bubble/cancel", "/api/bubble/reset", "/api/files/search"):
+                             "/api/bubble/calendar/delete/preview", "/api/bubble/calendar/delete/confirm", "/api/bubble/calendar/delete/cancel", "/api/bubble/calendar/update/choose", "/api/bubble/calendar/update/deselect", "/api/bubble/calendar/update/select", "/api/bubble/calendar/update/confirm", "/api/bubble/calendar/update/cancel", "/api/bubble/calendar/offer", "/api/bubble/calendar/more", "/api/bubble/calendar/refresh", "/api/bubble/calendar/confirm", "/api/bubble/calendar/cancel", "/api/bubble/calendar/revise", "/api/bubble/session", "/api/bubble/chat", "/api/bubble/cancel", "/api/bubble/reset", "/api/files/search", "/api/files/current", "/api/bubble/files/select", "/api/bubble/files/qa", "/api/bubble/files/handoff", "/api/bubble/memory", "/api/bubble/model", "/api/bubble/model/compare"):
             self.send_error(404)
             return
         if self.headers.get("Host") != f"{settings.HOST}:{settings.PORT}":
@@ -1157,7 +1226,24 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "请求格式不正确"})
                 return
             body = json.loads(self.rfile.read(size))
-            if self.path in ('/api/bubble/calendar/update/select','/api/bubble/calendar/update/confirm','/api/bubble/calendar/update/cancel','/api/bubble/session','/api/bubble/chat','/api/bubble/cancel','/api/bubble/reset','/api/bubble/calendar/offer','/api/bubble/calendar/more','/api/bubble/calendar/refresh','/api/bubble/calendar/confirm','/api/bubble/calendar/cancel','/api/bubble/calendar/revise'):
+            if self.path=="/api/chat" and not getattr(settings,"LEGACY_WEB_CHAT_ENABLED",False):
+                import unified_web
+                key=body.get('session_id')
+                if key not in unified_web.SESSIONS or unified_web.resolve(key)[2].selected_provider!='ollama':
+                    raise ValueError('旧文件正文入口只用于主动选择的本地Qwen网页会话；默认请使用统一助手入口。')
+            if self.path.startswith("/api/assistant/"):
+                __import__("unified_web").handle(self,body);return
+            if self.path in ('/api/bubble/memory','/api/bubble/model','/api/bubble/model/compare'):
+                bubble_chat.handle(self,body);return
+            if self.path.startswith('/api/bubble/files/'):
+                bubble_chat.handle(self,body);return
+            if self.path=='/api/files/current':
+                key=body.get('session_id')
+                if key not in SESSIONS:raise ValueError('文件会话已失效')
+                state=SESSIONS[key]
+                with state.lock:event=search_snapshot(state,{'tool':'find_files','results':visible(state),'total':len(state.current_filtered_results),**state.search_coverage},fresh=False)
+                self.send_json(200,{'event':event,'answer':listing_reply(event)});return
+            if self.path in ('/api/bubble/calendar/delete/preview','/api/bubble/calendar/delete/confirm','/api/bubble/calendar/delete/cancel','/api/bubble/calendar/update/choose','/api/bubble/calendar/update/deselect','/api/bubble/calendar/update/select','/api/bubble/calendar/update/confirm','/api/bubble/calendar/update/cancel','/api/bubble/session','/api/bubble/chat','/api/bubble/cancel','/api/bubble/reset','/api/bubble/calendar/offer','/api/bubble/calendar/more','/api/bubble/calendar/refresh','/api/bubble/calendar/confirm','/api/bubble/calendar/cancel','/api/bubble/calendar/revise'):
                 bubble_chat.handle(self,body)
                 return
             if self.path == "/api/files/search":
@@ -1168,6 +1254,7 @@ class Handler(BaseHTTPRequestHandler):
                     task_status.stage(token,"searching")
                     event = structured_search(body, state)
                 finally:task_status.finish(token)
+                __import__('unified_web').import_files(key)
                 self.send_json(200, {'session_id':key,'events':[event],'answer':listing_reply(event)})
                 return
             if self.path == "/api/index/cancel":
@@ -1231,6 +1318,7 @@ class Handler(BaseHTTPRequestHandler):
                             self.send_json(200, {"key": key})
                         elif body.get("operation") == "run":
                             event = saved_search(state, body.get("key"))
+                            __import__("unified_web").import_files(session_id)
                             self.send_json(200, {"events": [event], "answer": f"找到 {event['total']} 个匹配文件。",
                                                  "session_id": session_id})
                         else:
@@ -1247,7 +1335,10 @@ class Handler(BaseHTTPRequestHandler):
                     if path not in {item["path"] for item in state.last_search_results}:
                         raise ValueError("文件不属于当前搜索结果")
                     if self.path == "/api/preview":
-                        self.send_json(200, file_reader.preview_file(path))
+                        preview=file_reader.preview_file(path)
+                        state.selected_file=path
+                        __import__("unified_web").import_files(session_id,selected=True)
+                        self.send_json(200,preview)
                     elif self.path == "/api/related":
                         data = file_relationships.find_similar(path)
                         state.last_search_query = {"similar_to": path}
@@ -1256,12 +1347,14 @@ class Handler(BaseHTTPRequestHandler):
                         state.current_filtered_results = list(data["results"])
                         state.filters.clear()
                         state.selected_file = None
+                        __import__("unified_web").import_files(session_id)
                         self.send_json(200, {"events": [{"tool": "find_similar_files", **data}],
                                              "answer": f"找到 {data['total']} 个相似文件。"})
                     else:
                         op = file_tools.open_file if body["action"] == "open_file" else file_tools.reveal_in_finder
                         result = op(path)
                         state.selected_file = path
+                        __import__("unified_web").import_files(session_id,selected=True)
                         self.send_json(200, {"file": result})
                 return
             question = body.get("question")
@@ -1342,6 +1435,11 @@ class Handler(BaseHTTPRequestHandler):
             print(f"模型调用失败：{exc}")
             self.send_json(500, {"error": "模型调用失败，请确认 Ollama 已启动并已下载 qwen3.5:9b；详情见终端。"})
 
+
+import calendar_reminders
+calendar_reminders.start()
+import reminder_test_service
+reminder_test_service.resume()
 
 if __name__ == "__main__":
     settings.SEARCH_ROOTS["workspace"].mkdir(exist_ok=True)

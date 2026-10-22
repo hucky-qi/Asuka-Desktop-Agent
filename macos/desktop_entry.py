@@ -40,7 +40,7 @@ def launch(timeout=210):
                 record('reused' if reused else 'exited',launcher_pid=process.pid,reused_pet=reused);return 0
             # Consume only this launch's own log, never an old success line.
             with LOG.open('rb') as stream:stream.seek(offset);recent=stream.read()[-128000:]
-            if not reused and pet_running() and (b'Pet hit mask ready:' in recent or b'Native blue fallback ready' in recent):
+            if not reused and pet_running() and b'Pet hit mask ready:' in recent:
                 record('ready',launcher_pid=process.pid,reused_pet=False);return 0
             if not reused and pet_running() and 'Live2D 已回退原蓝色助手'.encode() in recent:
                 record('fallback',launcher_pid=process.pid,reused_pet=False);return 0

@@ -50,3 +50,15 @@ release-checks/
 !/live2d/models/Asuka/Asuka_Tilt_Hair_Work.1024/
 /live2d/models/Asuka/Asuka_Tilt_Hair_Work.1024/*
 !/live2d/models/Asuka/Asuka_Tilt_Hair_Work.1024/texture_00.png
+
+# Current private stores and developer checkpoints
+.release/
+acceptance/release-blockers/
+.deepseek-*
+.daily-*
+.calendar-*
+*.caf
+*.aiff
+*.wav
+*.m4a
+*.bak

@@ -1,7 +1,7 @@
 """Optional Baidu search snippets only; never sends memory/history/local data."""
 import os,re,json,html,ipaddress,ssl
 import certifi
-from urllib.parse import urlencode,urlparse
+from urllib.parse import urlparse
 from urllib.error import HTTPError
 import task_status
 import baidu_config
@@ -51,18 +51,23 @@ def search(text,cancel,opener=None):
             raw=response.read(256_001)
         if len(raw)>256_000:raise ValueError('搜索结果过大')
         data=json.loads(raw)
+        web_usage.record_round(getattr(response,"status",200),data,getattr(response,"headers",None))
     except HTTPError as error:
         try:
             detail=json.loads(error.read(256_000))
             from baidu_error_log import record
             record(detail,error.code,error.headers)
+            web_usage.record_round(error.code,detail,error.headers)
             code=str(detail.get('code',detail.get('error_code','')))
             code=code if re.fullmatch(r'[A-Za-z0-9_.-]{1,40}',code) else '未提供'
         except Exception:code='未提供'
         reason={401:'鉴权失败',403:'权限或试用资源不可用',429:'服务限流或额度不足'}.get(error.code,'服务调用失败')
         raise RuntimeError(f'百度搜索{reason}：HTTP {error.code}，code {code}（已计数，不自动重试）') from None
-    except (ValueError,InterruptedError):raise
+    except (ValueError,InterruptedError) as error:
+        if isinstance(error,ValueError):web_usage.record_round(error_type=type(error).__name__)
+        raise
     except Exception as error:
+        web_usage.record_round(error_type=type(error).__name__)
         raise RuntimeError('百度搜索请求失败或超时，未获得可核实结果（本次已计数，不自动重试）') from error
     finally:task_status.stage_current('generating')
     if cancel.is_set():raise InterruptedError('已取消')

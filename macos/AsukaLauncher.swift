@@ -1,6 +1,9 @@
 import AppKit
 import EventKit
 import CryptoKit
+import UserNotifications
+import Speech
+import AVFoundation
 
 
 // CALENDAR_RANGE_BEGIN
@@ -33,15 +36,21 @@ final class CalendarReadBridge {
         root=project.appendingPathComponent(".runtime/calendar-ipc",isDirectory:true)
         try? FileManager.default.createDirectory(at:root,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         wasGranted=FileManager.default.fileExists(atPath:root.appendingPathComponent("previously-allowed").path)
-        timer=Timer.scheduledTimer(withTimeInterval:0.3,repeats:true){[weak self] _ in self?.tick()}
-        DispatchQueue.main.async { [weak self] in self?.tick() }
+        timer=Timer.scheduledTimer(withTimeInterval:0.3,repeats:true){[weak self] _ in self?.pollMailbox()}
+        DispatchQueue.main.async { [weak self] in self?.pollMailbox() }
     }
     func save(_ object:[String:Any],_ file:URL) {
         guard let data=try? JSONSerialization.data(withJSONObject:object) else{return}
         try? data.write(to:file,options:.atomic);try? FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:file.path)
     }
+    private let mailboxQueue=DispatchQueue(label:"local.filechat.calendar-mailbox")
+    private var mailboxReading=false
+    func pollMailbox(){
+        guard !mailboxReading else{return};mailboxReading=true
+        mailboxQueue.async{[weak self] in guard let self else{return};self.tick();DispatchQueue.main.async{self.mailboxReading=false}}
+    }
     func tick() {
-        save(["pid":ProcessInfo.processInfo.processIdentifier,"bundle":Bundle.main.bundleIdentifier ?? "","version":5],root.appendingPathComponent("ready.json"))
+        save(["pid":ProcessInfo.processInfo.processIdentifier,"bundle":Bundle.main.bundleIdentifier ?? "","version":6],root.appendingPathComponent("ready.json"))
         // Read only the explicit mailbox. Directory enumeration may block macOS launch.
         let mailbox=root.appendingPathComponent("queue.json")
         let ids=(try? Data(contentsOf:mailbox)).flatMap {try? JSONSerialization.jsonObject(with:$0)} as? [String] ?? []
@@ -60,6 +69,16 @@ final class CalendarReadBridge {
     }
     func respond(_ id:String,_ q:[String:Any],_ file:URL) {
         let status=EKEventStore.authorizationStatus(for:.event)
+        if q["action"] as? String == "permission_status" {
+            let state:String
+            if status == .notDetermined {state="authorization_required"}
+            else if status == .denied {state="denied"}
+            else if status == .restricted {state="restricted"}
+            else if #available(macOS 14.0,*),status == .writeOnly {state="write_only"}
+            else {state="allowed"}
+            save(["id":id,"status":state,"source":"EventKit.authorizationStatus","previously_allowed_marker":wasGranted,"bundle":Bundle.main.bundleIdentifier ?? ""],file);return
+        }
+        if q["action"] as? String == "reminder_check",status == .notDetermined {save(["id":id,"status":"authorization_required"],file);return}
         if status == .notDetermined {
             save(["id":id,"status":"authorization_required"],file)
             guard !requestingPermission else{return};requestingPermission=true
@@ -79,7 +98,7 @@ final class CalendarReadBridge {
         if #available(macOS 14.0,*) { allowed=status == .fullAccess } else { allowed=status == .authorized }
         guard allowed else {save(["id":id,"status":"read_error"],file);return}
         rememberAllowed()
-        if let action=q["action"] as? String,action.hasPrefix("update") {updateAction(id,q,file);return}
+        if let action=q["action"] as? String,(action.hasPrefix("update") || action.hasPrefix("delete") || action == "reminder_check") {updateAction(id,q,file);return}
         if let action=q["action"] as? String,action != "read" {createAction(id,q,file);return}
         let interval:(Date,Date)?
         if let date=q["date"] as? String,let period=q["period"] as? String {
@@ -185,8 +204,9 @@ final class CalendarReadBridge {
         }
         func row(_ event:EKEvent)->[String:Any] {
             let stable=preserved(event)
+            let local=event.calendar.type == .local && event.calendar.source?.sourceType == .local && !event.calendar.isSubscribed
             let version=hash(["preserved":stable,"title":event.title ?? "","start":event.startDate.timeIntervalSince1970,"end":event.endDate.timeIntervalSince1970,"modified":event.lastModifiedDate?.timeIntervalSince1970 ?? -1,"recurring":!(event.recurrenceRules ?? []).isEmpty || event.isDetached,"attendees":!(event.attendees ?? []).isEmpty || event.organizer != nil,"writable":event.calendar.allowsContentModifications])
-            return ["event_id":event.eventIdentifier ?? "","title":event.title ?? "无标题","start":formatter.string(from:event.startDate),"end":formatter.string(from:event.endDate),"timezone":TimeZone.autoupdatingCurrent.identifier,"calendar_id":event.calendar.calendarIdentifier,"calendar_title":event.calendar.title,"all_day":event.isAllDay,"writable":event.calendar.allowsContentModifications,"recurring":!(event.recurrenceRules ?? []).isEmpty || event.isDetached,"has_attendees":!(event.attendees ?? []).isEmpty || event.organizer != nil,"version":version,"preserved_version":stable]
+            return ["reminder_supported":local && !event.isAllDay && (event.recurrenceRules ?? []).isEmpty && !event.isDetached && (event.attendees ?? []).isEmpty && event.organizer == nil,"shared":local ? false as Any : NSNull() as Any,"calendar_type":event.calendar.type.rawValue,"event_id":event.eventIdentifier ?? "","title":event.title ?? "无标题","start":formatter.string(from:event.startDate),"end":formatter.string(from:event.endDate),"timezone":TimeZone.autoupdatingCurrent.identifier,"calendar_id":event.calendar.calendarIdentifier,"calendar_title":event.calendar.title,"all_day":event.isAllDay,"writable":event.calendar.allowsContentModifications,"recurring":!(event.recurrenceRules ?? []).isEmpty || event.isDetached,"has_attendees":!(event.attendees ?? []).isEmpty || event.organizer != nil,"version":version,"preserved_version":stable,"delete_supported":event.calendar.type == .local && !event.isAllDay && event.calendar.allowsContentModifications && (event.recurrenceRules ?? []).isEmpty && !event.isDetached && (event.attendees ?? []).isEmpty && event.organizer == nil]
         }
         func suitable(_ e:EKEvent)->Bool {e.calendar.allowsContentModifications && !e.isAllDay && (e.recurrenceRules ?? []).isEmpty && !e.isDetached && (e.attendees ?? []).isEmpty && e.organizer == nil}
         let target=q["event"] as? [String:Any] ?? [:]
@@ -200,9 +220,45 @@ final class CalendarReadBridge {
             }
             return (rows,hash(["conflicts":rows.map{["id":$0["event_id"]!,"version":$0["version"]!]}]))
         }
-        if action == "update_check" {
+        if action == "update_check" || action == "reminder_check" {
             guard let original=reader.event(withIdentifier:eid) else{reply(["status":"not_found","message":"原事件已删除或身份不可读，请重新查询"]);return}
+            guard original.eventIdentifier==eid else{reply(["status":"not_found","message":"事件身份返回不一致，已阻止操作"]);return}
             let (other,version)=conflicts();reply(["status":"ok","event":row(original),"conflicts":other,"conflict_version":version]);return
+        }
+        if action == "delete" || action == "delete_reconcile" {
+            guard let op=q["operation_id"] as? String,op.count==32,op.allSatisfy({$0.isHexDigit}),
+                  let expected=q["expected_version"] as? String,let cid=q["calendar_id"] as? String else {reply(["status":"invalid"]);return}
+            let directory=root.appendingPathComponent("deletes",isDirectory:true),record=directory.appendingPathComponent(op+".json")
+            do {try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])}
+            catch {reply(["status":"write_error","message":"无法保存删除防重复记录，未删除"]);return}
+            let exists=FileManager.default.fileExists(atPath:record.path)
+            let previous=(try? Data(contentsOf:record)).flatMap{try? JSONSerialization.jsonObject(with:$0)} as? [String:Any]
+            if exists || action == "delete_reconcile" {
+                guard let old=previous,old["event_id"] as? String==eid,old["calendar_id"] as? String==cid,old["expected_version"] as? String==expected else {reply(["status":"uncertain","message":"原删除记录不匹配，不会重试"]);return}
+                if reader.event(withIdentifier:eid) == nil {
+                    let result:[String:Any] = ["status":"verified","event_id":eid,"deleted":true]
+                    save(result.merging(["calendar_id":cid,"expected_version":expected]){a,_ in a},record);reply(result)
+                } else {reply(["status":"uncertain","message":"原事件仍可读取；不会自动再次删除，请人工核对"])}
+                return
+            }
+            guard let event=reader.event(withIdentifier:eid),event.eventIdentifier==eid,event.calendar.calendarIdentifier==cid else {reply(["status":"stale","message":"原事件已删除或身份不一致，未删除"]);return}
+            // EventKit does not reliably expose all sharing metadata. Initial scope is local-only.
+            guard suitable(event),event.calendar.type == .local else {reply(["status":"write_error","message":"删除仅支持本机本地普通单次可写日历；云端、共享、全天、重复或会议暂不支持"]);return}
+            guard row(event)["version"] as? String==expected else {reply(["status":"stale","message":"删除前事件已变化，请重新预览"]);return}
+            do {
+                let reservation=try JSONSerialization.data(withJSONObject:["status":"writing","event_id":eid,"calendar_id":cid,"expected_version":expected])
+                try reservation.write(to:record,options:.atomic)
+                try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:record.path)
+            } catch {reply(["status":"write_error","message":"防重复记录未保存，未删除"]);return}
+            do {
+                try reader.remove(event,span:.thisEvent,commit:true)
+                let verifier=EKEventStore()
+                if verifier.event(withIdentifier:eid) == nil {
+                    let result:[String:Any]=["status":"verified","event_id":eid,"calendar_id":cid,"expected_version":expected,"deleted":true]
+                    save(result,record);reply(result)
+                } else {reply(["status":"uncertain","message":"系统删除已返回但原事件仍可读，只能核对，不重复删除"])}
+            } catch {reply(["status":"uncertain","message":"系统删除未明确完成；只核对原操作，不自动重试"])}
+            return
         }
         guard ["update","update_reconcile"].contains(action),let a=start,let b=end,b>a,
               let op=q["operation_id"] as? String,op.count==32,op.allSatisfy({$0.isHexDigit}),
@@ -225,7 +281,7 @@ final class CalendarReadBridge {
             return
         }
         guard let event=reader.event(withIdentifier:eid) else{reply(["status":"stale","message":"原事件已删除，请重新查询"]);return}
-        guard suitable(event) else{reply(["status":"write_error","message":"只读、全天、重复或含与会者的事件本轮不支持修改"]);return}
+        guard event.eventIdentifier==eid,event.calendar.calendarIdentifier==target["calendar_id"] as? String,suitable(event) else{reply(["status":"write_error","message":"只读、全天、重复或含与会者的事件本轮不支持修改"]);return}
         let (_,currentConflicts)=conflicts()
         guard row(event)["version"] as? String==expected,currentConflicts==expectedConflicts else {reply(["status":"stale","message":"保存前原事件或冲突发生变化，请重新预览"]);return}
         guard a>Date(),let title=target["title"] as? String,!title.isEmpty,title.count<=200 else{reply(["status":"invalid","message":"时间已过或标题无效，未修改"]);return}
@@ -254,16 +310,238 @@ final class CalendarReadBridge {
     }
 }
 
+// Local user notifications: original app identity only. No chat/model/tool callbacks.
+final class ReminderNotificationBridge:NSObject,UNUserNotificationCenterDelegate {
+    let root:URL,plans:URL
+    let center=UNUserNotificationCenter.current()
+    var timer:Timer?,seen=Set<String>()
+    private let permissionLock=NSLock()
+    private var permissionPending=false
+    private var statusItem:NSStatusItem?
+    private var pendingRows=[String:[String:Any]](),notificationFocus=""
+    private var motionObserver:NSObjectProtocol?
+    func endPermission(){permissionLock.lock();permissionPending=false;permissionLock.unlock()}
+    init(_ project:URL) {
+        root=project.appendingPathComponent(".runtime/reminder-ipc",isDirectory:true)
+        plans=project.appendingPathComponent(".runtime/calendar-reminders/plans.json")
+        super.init();center.delegate=self
+        motionObserver=DistributedNotificationCenter.default().addObserver(forName:NSNotification.Name("local.filechat.reminder.position"),object:nil,queue:.main){[weak self] _ in self?.refreshReminderBubble()}
+        let token=(UUID().uuidString+UUID().uuidString).replacingOccurrences(of:"-",with:"").lowercased()
+        try? FileManager.default.createDirectory(at:root,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        save(["token":token,"pid":ProcessInfo.processInfo.processIdentifier],root.appendingPathComponent("test-capability.json"))
+        ensureStatusItem()
+        try? FileManager.default.createDirectory(at:root,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        if let raw=try? Data(contentsOf:root.appendingPathComponent("pending-presentation.json")),let d=(try? JSONSerialization.jsonObject(with:raw)) as? [String:[String:Any]] {pendingRows=d}
+        timer=Timer.scheduledTimer(withTimeInterval:0.5,repeats:true){[weak self] _ in self?.tick()}
+    }
+    func ensureStatusItem(){
+        guard statusItem == nil else{return}
+        let item=NSStatusBar.system.statusItem(withLength:22)
+        var image:NSImage?
+        if let name=Bundle.main.object(forInfoDictionaryKey:"CFBundleIconFile") as? String,let root=Bundle.main.resourceURL {image=NSImage(contentsOf:root.appendingPathComponent(name.hasSuffix(".icns") ? name:name+".icns"))}
+        if image == nil {image=NSImage(named:NSImage.applicationIconName)}
+        if let image {image.size=NSSize(width:18,height:18);image.isTemplate=false;item.button?.image=image}
+        else {item.button?.title="明日香"}
+        item.button?.toolTip="明日香小助手"
+        let menu=NSMenu();let test=NSMenuItem(title:"测试提醒（不访问日历）",action:#selector(openTest),keyEquivalent:"");test.target=self;menu.addItem(test);item.menu=menu;statusItem=item
+    }
+    @objc func openTest(){
+        guard let raw=try? Data(contentsOf:root.appendingPathComponent("test-capability.json")),let d=(try? JSONSerialization.jsonObject(with:raw)) as? [String:Any],let token=d["token"] as? String,
+              let url=URL(string:"http://127.0.0.1:8765/reminder-notifications#"+token) else{return}
+        NSWorkspace.shared.open(url)
+    }
+    func save(_ d:[String:Any],_ url:URL) {
+        if let raw=try? JSONSerialization.data(withJSONObject:d) {try? raw.write(to:url,options:.atomic);try? FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)}
+    }
+    func current(_ r:[String:Any])->Bool {
+        guard let id=r["id"] as? String,let version=r["version"] as? Int,let delivery=r["delivery_id"] as? String,
+              let bytes=try? Data(contentsOf:r["synthetic"] as? Bool==true ? root.deletingLastPathComponent().appendingPathComponent("reminder-tests/plans.json"):plans),let store=(try? JSONSerialization.jsonObject(with:bytes)) as? [String:Any],
+              let items=store["items"] as? [String:[String:Any]],let row=items[id],row["version"] as? Int==version,row["delivery_id"] as? String==delivery else{return false}
+        if let text=row["start"] as? String,let start=ISO8601DateFormatter().date(from:text),start<=Date(){return false}
+        return ["claimed","system_accepted","system_visible","user_viewed"].contains(row["status"] as? String ?? "")
+    }
+    func tick() {
+        refreshReminderBubble()
+        save(["bundle":Bundle.main.bundleIdentifier ?? "","protocol":1,"pid":ProcessInfo.processInfo.processIdentifier,"menu_created":statusItem != nil,"menu_image_attached":statusItem?.button?.image != nil,"menu_visible":statusItem?.isVisible ?? false],root.appendingPathComponent("ready.json"))
+        let ids=(try? Data(contentsOf:root.appendingPathComponent("queue.json"))).flatMap{try? JSONSerialization.jsonObject(with:$0)} as? [String] ?? []
+        for id in ids.suffix(256) where id.count==32 && id.allSatisfy({$0.isHexDigit}) {
+            let file=root.appendingPathComponent(id+".request.json")
+            guard let raw=try? Data(contentsOf:file),raw.count<8192,let q=(try? JSONSerialization.jsonObject(with:raw)) as? [String:Any],
+                  let id=q["id"] as? String,id.count==32,id.allSatisfy({$0.isHexDigit}),!seen.contains(id),
+                  let at=q["at"] as? Double,abs(Date().timeIntervalSince1970-at)<30,let action=q["action"] as? String else{continue}
+            seen.insert(id);if seen.count>512{seen=Set(seen.suffix(256))}
+            let response=root.appendingPathComponent(id+".response.json")
+            func reply(_ d:[String:Any]){var d=d;d["id"]=id;self.save(d,response)}
+            if action=="authorize" {
+                guard q["explicit_user_action"] as? Bool==true else{reply(["status":"refused"]);continue}
+                permissionLock.lock()
+                if permissionPending {permissionLock.unlock();reply(["status":"authorization_pending"]);continue}
+                permissionPending=true;permissionLock.unlock()
+                center.getNotificationSettings { state in
+                    guard state.authorizationStatus == .notDetermined else{self.endPermission();reply(["status":state.authorizationStatus == .authorized ? "authorized":"denied"]);return}
+                    self.center.requestAuthorization(options:[.alert,.sound]) { granted,error in self.endPermission();reply(["status":granted ? "authorized":"denied","error":error != nil]) }
+                };continue
+            }
+            if action=="cancel",let delivery=q["delivery_id"] as? String {
+                center.removePendingNotificationRequests(withIdentifiers:[delivery]);center.removeDeliveredNotifications(withIdentifiers:[delivery]);if delivery.count==32 && delivery.allSatisfy({$0.isHexDigit}) {self.save(["delivery_id":delivery,"status":"cancelled"],root.appendingPathComponent(delivery+".delivery.json"))};reply(["status":"cancel_requested"]);continue
+            }
+            if action=="status" {center.getNotificationSettings { state in reply(["status":state.authorizationStatus == .authorized ? "authorized":state.authorizationStatus == .notDetermined ? "authorization_required":"denied"]) };continue}
+            if action=="visible" {center.getDeliveredNotifications { rows in reply(["status":"ok","delivery_ids":rows.map{$0.request.identifier}]) };continue}
+            guard action=="send" || action=="test" else{reply(["status":"unsupported"]);continue}
+            let test=action=="test"
+            let r=q["reminder"] as? [String:Any] ?? [:]
+            guard test ? q["explicit_user_action"] as? Bool==true : current(r),let delivery=(test ? q["delivery_id"] : r["delivery_id"]) as? String,delivery.count==32,delivery.allSatisfy({$0.isHexDigit}) else{reply(["status":"stale"]);continue}
+            let journal=root.appendingPathComponent(delivery+".delivery.json")
+            if let old=try? Data(contentsOf:journal),let d=(try? JSONSerialization.jsonObject(with:old)) as? [String:Any] {reply(["status":d["status"] as? String ?? "unknown"]);continue}
+            if test,let old=try? Data(contentsOf:root.appendingPathComponent("last-test.json")),let d=(try? JSONSerialization.jsonObject(with:old)) as? [String:Double],Date().timeIntervalSince1970-(d["at"] ?? 0)<60 {reply(["status":"test_throttled"]);continue}
+            if test {self.save(["at":Date().timeIntervalSince1970],self.root.appendingPathComponent("last-test.json"))}
+            if test || r["synthetic"] as? Bool==true {
+                let budget=root.appendingPathComponent("delivery-test-budget-shared-reminder.json")
+                let raw=try? Data(contentsOf:budget)
+                if FileManager.default.fileExists(atPath:budget.path) && raw.flatMap({try? JSONSerialization.jsonObject(with:$0)}) as? [String:Any] == nil {reply(["status":"test_budget_unreadable"]);continue}
+                var d=(raw.flatMap{try? JSONSerialization.jsonObject(with:$0)} as? [String:Any]) ?? ["used":0]
+                let used=d["used"] as? Int ?? 3
+                if d["closed"] as? Bool==true || used>=3 {reply(["status":"test_budget_exhausted"]);continue}
+                d["used"]=used+1;save(d,budget)
+            }
+            center.getNotificationSettings { state in
+                guard state.authorizationStatus == .authorized else {reply(["status":state.authorizationStatus == .notDetermined ? "authorization_required":"denied"]);return}
+                if !test && !self.current(r){reply(["status":"stale"]);return}
+                self.save(["status":"unknown","delivery_id":delivery],journal) // Reserve BEFORE calling system; no blind retry after crash.
+                let content=UNMutableNotificationContent()
+                content.title=test ? "明日香助手 · 测试通知" : (r["catchup"] as? Bool==true ? "补提醒 · ":"提醒 · ")+String((r["title"] as? String ?? "日程").prefix(160))
+                content.body=test ? "这是明确标注的功能测试，不是真实日程。" : String((r["start"] as? String ?? "").prefix(60))+" · 距开始约\(r["minutes_until_start"] as? Int ?? 0)分钟"
+                content.sound = .default
+                content.userInfo=test ? ["test":true,"delivery_id":delivery] : ["reminder_id":r["id"] ?? "","version":r["version"] ?? 0,"delivery_id":delivery,"synthetic":r["synthetic"] as? Bool ?? false]
+                self.center.add(UNNotificationRequest(identifier:delivery,content:content,trigger:nil)) { error in
+                    let status=error==nil ? "system_accepted":"failed"
+                    self.save(["status":status,"delivery_id":delivery],journal)
+                    if error==nil && !test {DispatchQueue.main.async{var row=r;row["presentation_at"]=Date().timeIntervalSince1970;self.pendingRows[delivery]=row;self.persistPresentation();self.refreshReminderBubble()}}
+                    reply(["status":status])
+                }
+            }
+        }
+    }
+    func userNotificationCenter(_ center:UNUserNotificationCenter,willPresent notification:UNNotification,withCompletionHandler completionHandler:@escaping (UNNotificationPresentationOptions)->Void){completionHandler([.banner,.sound])}
+    func userNotificationCenter(_ center:UNUserNotificationCenter,didReceive response:UNNotificationResponse,withCompletionHandler completionHandler:@escaping ()->Void) {
+        let info=response.notification.request.content.userInfo
+        if info["test"] as? Bool==true,let delivery=info["delivery_id"] as? String,delivery.count==32,delivery.allSatisfy({$0.isHexDigit}),
+           let raw=try? Data(contentsOf:root.appendingPathComponent(delivery+".delivery.json")),let d=(try? JSONSerialization.jsonObject(with:raw)) as? [String:Any],d["status"] as? String=="system_accepted" {
+            save(["delivery_id":delivery,"status":"user_viewed_test"],root.appendingPathComponent(delivery+".click.json"))
+            // Legacy isolated notification records viewing only; no separate window.
+        }
+        if let id=info["reminder_id"] as? String,let v=info["version"] as? Int,let delivery=info["delivery_id"] as? String,id.count==64,delivery.count==32 {
+            let r:[String:Any]=["id":id,"version":v,"delivery_id":delivery,"synthetic":info["synthetic"] as? Bool ?? false]
+            if current(r){save(r,root.appendingPathComponent(delivery+".click.json"))
+                DispatchQueue.main.async {self.notificationFocus=delivery+":"+UUID().uuidString;self.refreshReminderBubble()}
+            }
+        }
+        completionHandler()
+    }
+    func persistPresentation(){save(pendingRows,root.appendingPathComponent("pending-presentation.json"))}
+    func refreshReminderBubble(){
+        for (id,r) in pendingRows where !current(r){pendingRows.removeValue(forKey:id)}
+        persistPresentation()
+        // Publication only. The original pet owns the ONE chat WKWebView/window.
+        let rows=pendingRows.values.sorted{($0["presentation_at"] as? Double ?? 0)<($1["presentation_at"] as? Double ?? 0)}
+        save(["protocol":2,"at":Date().timeIntervalSince1970,"pid":ProcessInfo.processInfo.processIdentifier,"rows":rows,"focus":notificationFocus],root.appendingPathComponent("shared-presentation.json"))
+    }
+
+}
+
+// Explicit local recording only. No online recognizer, no transcript persistence.
+@available(macOS 26.0, *)
+final class LocalSpeechBridge {
+    let root:URL
+    var timer:Timer?,recorder:AVAudioRecorder?,job:Task<Void,Never>?
+    var token="",state="idle",message="",text="",available=false,started=Date(),seen=""
+    var temporary:URL?
+    init(_ project:URL) {
+        root=project.appendingPathComponent(".runtime/speech-ipc")
+        try? FileManager.default.createDirectory(at:root,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
+        // Clean only our own abandoned recordings, never user audio.
+        for f in (try? FileManager.default.contentsOfDirectory(at:root,includingPropertiesForKeys:nil)) ?? [] where f.lastPathComponent.hasPrefix("capture-") && f.pathExtension=="caf" {try? FileManager.default.removeItem(at:f)}
+        job=Task { @MainActor in
+            do {
+                guard SpeechTranscriber.isAvailable else {self.message="系统不支持中文本地转写。";return}
+                let locale=Locale(identifier:"zh_CN")
+                guard await SpeechTranscriber.installedLocales.contains(where:{$0.identifier=="zh_CN" || $0.identifier=="zh-CN"}) else {self.message="中文本地语音资产尚未安装。";return}
+                _ = try await AssetInventory.reserve(locale:locale)
+                let m=SpeechTranscriber(locale:locale,preset:.transcription)
+                if let request=try await AssetInventory.assetInstallationRequest(supporting:[m]) {try await request.downloadAndInstall()}
+                self.available = await AssetInventory.status(forModules:[m]) == .installed
+            } catch {self.message="中文本地语音资产准备失败；不会转为云端。"}
+        }
+        timer=Timer.scheduledTimer(withTimeInterval:0.15,repeats:true){[weak self] _ in self?.tick()}
+    }
+    func save(_ d:[String:Any],_ url:URL){if let data=try? JSONSerialization.data(withJSONObject:d){try? data.write(to:url,options:.atomic);try? FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)}}
+    func clearAudio(){recorder?.stop();recorder=nil;if let f=temporary{try? FileManager.default.removeItem(at:f)};temporary=nil}
+    func cancel(){token="";job?.cancel();clearAudio();state="cancelled";text=""}
+    func tick(){
+        for f in (try? FileManager.default.contentsOfDirectory(at:root,includingPropertiesForKeys:[.contentModificationDateKey])) ?? [] where f.lastPathComponent.hasSuffix(".response.json") {
+            if let at=(try? f.resourceValues(forKeys:[.contentModificationDateKey]))?.contentModificationDate,Date().timeIntervalSince(at)>5 {try? FileManager.default.removeItem(at:f)}
+        }
+        if ["requesting","recording","transcribing"].contains(state) && Date().timeIntervalSince(started)>150 {cancel();state="error";message="录音或转写超时，请重新录入。"}
+        save(["pid":ProcessInfo.processInfo.processIdentifier,"bundle":Bundle.main.bundleIdentifier ?? "","protocol":1,"available":available,"message":message],root.appendingPathComponent("ready.json"))
+        let file=root.appendingPathComponent("command.json")
+        guard let data=try? Data(contentsOf:file),data.count<1024,let q=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],let id=q["id"] as? String,id.count==32,id.allSatisfy({$0.isHexDigit}),id != seen,let at=q["at"] as? Double,abs(Date().timeIntervalSince1970-at)<4,let action=q["action"] as? String,let t=q["token"] as? String,t.count==32,t.allSatisfy({$0.isHexDigit}) else{return}
+        seen=id;try? FileManager.default.removeItem(at:file)
+        if action=="start" && available && !["recording","transcribing","requesting"].contains(state) {
+            token=t;text="";message="";state="requesting";started=Date()
+            AVCaptureDevice.requestAccess(for:.audio){[weak self] granted in DispatchQueue.main.async {
+                guard let self,self.token==t,self.state=="requesting" else{return}
+                guard granted else{self.state="error";self.message="麦克风未获允许；请到系统设置→隐私与安全性→麦克风允许原助手，再重新录音。";return}
+                do {
+                    let url=self.root.appendingPathComponent("capture-"+t+".caf");self.temporary=url
+                    let r=try AVAudioRecorder(url:url,settings:[AVFormatIDKey:kAudioFormatLinearPCM,AVSampleRateKey:16000,AVNumberOfChannelsKey:1,AVLinearPCMBitDepthKey:16,AVLinearPCMIsFloatKey:false])
+                    self.recorder=r
+                    guard r.record(forDuration:120) else{throw NSError(domain:"MicUnavailable",code:1)}
+                    self.state="recording"
+                } catch {self.clearAudio();self.state="error";self.message="无法打开输入设备，请检查麦克风后重试。"}
+            }}
+        } else if t==token {
+            if action=="cancel"{cancel()}
+            else if action=="stop" && state=="recording"{transcribe(t)}
+        } else {save(["status":"cancelled"],root.appendingPathComponent(id+".response.json"));return}
+        var result:[String:Any]=["status":state,"message":message]
+        if state=="complete"{result["text"]=text;text="";state="idle";token=""}
+        save(result,root.appendingPathComponent(id+".response.json"))
+    }
+    func transcribe(_ t:String){
+        recorder?.stop();recorder=nil;state="transcribing";started=Date()
+        guard let file=temporary else{state="error";return}
+        job=Task { @MainActor in
+            let module=SpeechTranscriber(locale:Locale(identifier:"zh_CN"),preset:.transcription)
+            let analyzer=SpeechAnalyzer(modules:[module])
+            let collector=Task {() throws -> String in var result="";for try await row in module.results {try Task.checkCancellation();result += String(row.text.characters)};return result}
+            do {
+                try await withTaskCancellationHandler(operation:{
+                    let input=try AVAudioFile(forReading:file)
+                    try await analyzer.start(inputAudioFile:input,finishAfterFile:true)
+                    let result=try await collector.value
+                    try Task.checkCancellation()
+                    if self.token==t{self.text=result.count<=6000 ? result:"";self.state=result.count>6000 ? "error":result.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? "error":"complete";self.message=self.state=="error" ? "没有识别到清晰语音，请重新录音。":""}
+                },onCancel:{collector.cancel();Task{await analyzer.cancelAndFinishNow()}})
+            } catch {if self.token==t{self.state="error";self.message="本地转写未完成，请重录或继续文字输入。"}}
+            if self.token==t{self.clearAudio()}
+        }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var worker: Process?
     private var calendarBridge: CalendarReadBridge?
+    private var reminderBridge: ReminderNotificationBridge?
+    private var speechBridge: AnyObject?
     private var stopObserver: NSObjectProtocol?
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if let path=Bundle.main.object(forInfoDictionaryKey:"AsukaProjectPath") as? String {calendarBridge=CalendarReadBridge(URL(fileURLWithPath:path))}
+        if let path=Bundle.main.object(forInfoDictionaryKey:"AsukaProjectPath") as? String {if #available(macOS 26.0,*) {speechBridge=LocalSpeechBridge(URL(fileURLWithPath:path))};calendarBridge=CalendarReadBridge(URL(fileURLWithPath:path));reminderBridge=ReminderNotificationBridge(URL(fileURLWithPath:path))}
         stopObserver=DistributedNotificationCenter.default().addObserver(forName:NSNotification.Name("local.filechat.asuka.launcher.stop"),object:nil,queue:.main){_ in NSApp.terminate(nil)}
         launch()
     }
+    func applicationWillTerminate(_ notification:Notification) {if #available(macOS 26.0,*) {(speechBridge as? LocalSpeechBridge)?.cancel()}}
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        reminderBridge?.ensureStatusItem()
         if worker?.isRunning != true { launch() }
         return false
     }
@@ -295,3 +573,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 let application=NSApplication.shared
 let delegate=AppDelegate();application.delegate=delegate
 application.setActivationPolicy(.accessory);application.run()
+
+extension URL {func withSuffixResult()->URL {URL(fileURLWithPath:deletingPathExtension().path+".result.json")}}

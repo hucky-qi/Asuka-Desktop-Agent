@@ -29,7 +29,7 @@ def create(icon_source,destination):
     contents=stage/'Contents';(contents/'MacOS').mkdir(parents=True);(contents/'Resources').mkdir()
     shutil.copy2(launcher,contents/'MacOS/AsukaLauncher')
     if icon_source:shutil.copy2(icns,contents/'Resources/Asuka.icns')
-    metadata={'CFBundleName':'明日香助手','CFBundleDisplayName':'明日香助手','CFBundleIdentifier':'local.filechat.asuka.launcher','CFBundleExecutable':'AsukaLauncher','CFBundlePackageType':'APPL','CFBundleVersion':'1','CFBundleShortVersionString':'1.0','LSUIElement':True,'NSHighResolutionCapable':True,'LSMinimumSystemVersion':'13.0','AsukaProjectPath':str(PROJECT),'NSCalendarsFullAccessUsageDescription':'仅在你询问时读取本机日历；只有你核对预览并明确确认后才创建或修改单次事件并读回核对。不删除或上传日历。','NSCalendarsUsageDescription':'读取本机日历并在明确确认后创建或修改单次事件；不删除或上传。'}
+    metadata={'CFBundleName':'明日香助手','CFBundleDisplayName':'明日香助手','CFBundleIdentifier':'local.filechat.asuka.launcher','CFBundleExecutable':'AsukaLauncher','CFBundlePackageType':'APPL','CFBundleVersion':'1','CFBundleShortVersionString':'1.0','LSUIElement':True,'NSHighResolutionCapable':True,'LSMinimumSystemVersion':'13.0','AsukaProjectPath':str(PROJECT),'NSMicrophoneUsageDescription':'仅主动点击时在本机录音转为草稿，不自动发送或上传。','NSCalendarsFullAccessUsageDescription':'仅在你询问时读取本机日历；只有你核对预览并明确确认后才创建或修改单次事件并读回核对。不删除或上传日历。','NSCalendarsUsageDescription':'读取本机日历并在明确确认后创建或修改单次事件；不删除或上传。'}
     if icon_source:metadata['CFBundleIconFile']='Asuka.icns'
     (contents/'Info.plist').write_bytes(plistlib.dumps(metadata))
     # Ad-hoc local signing; no certificate purchase, distribution or notarization.

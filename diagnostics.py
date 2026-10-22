@@ -9,9 +9,10 @@ import task_status
 local = threading.local()
 
 class Trace:
-    def __init__(self, request_id, emit=None):
+    def __init__(self, request_id, emit=None, task_token=None):
         self.id = request_id
-        self.task_token = task_status.begin(request_id, "file")
+        self.task_token = task_token if task_token is not None else task_status.begin(request_id, "file")
+        self.owns_task = task_token is None
         self.emit_callback = emit
         self.started = time.perf_counter()
         self.sequence = 0
@@ -42,7 +43,7 @@ class Trace:
         return {'request_id':self.id,'timings':self.timings,'model_calls':self.model_calls,'tool_calls':self.tool_calls,
                 'first_cards_seconds':self.first_cards,'total_seconds':time.perf_counter()-self.started,'coverage':self.coverage,'retrieval':self.retrieval}
     def save(self, outcome):
-        task_status.finish(self.task_token,outcome)
+        if self.owns_task:task_status.finish(self.task_token,outcome)
         data={**self.summary(),'outcome':outcome}
         folder=settings.PROJECT/'.runtime';folder.mkdir(exist_ok=True)
         with (folder/'performance.jsonl').open('a',encoding='utf-8') as f:f.write(json.dumps(data,ensure_ascii=False)+'\n')

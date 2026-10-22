@@ -15,7 +15,7 @@ def _port(name, default):
 PORT = _port('LOCAL_FILE_CHAT_PORT', 8765)
 LIVE2D_PORT = _port('LOCAL_FILE_CHAT_LIVE2D_PORT', 8766)
 PROJECT = Path(__file__).resolve().parent
-WORKSPACE = PROJECT.parent / "workspace" if (PROJECT.parent / "workspace").is_dir() else PROJECT / "workspace"
+WORKSPACE = PROJECT / "workspace"
 SEARCH_ROOTS = {
     "workspace": WORKSPACE,
     "desktop": Path.home() / "Desktop",

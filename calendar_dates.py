@@ -4,7 +4,7 @@ DIGITS={'零':0,'〇':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,
 NUM=r'[0-9零〇一二两三四五六七八九十]+'
 WEEK=r'(?:下下周|下周|本周|这周|下下(?:个)?星期|下(?:个)?星期|本星期|这(?:个)?星期)'
 DAY=r'[一二三四五六日天1234567]'
-DATE_TOKEN=re.compile(r'\d{4}(?:年\d{1,2}月\d{1,2}日?|[-/]\d{1,2}[-/]\d{1,2})|'+WEEK+'(?:'+DAY+')?|(?:本月|这个月|下月|下个月)'+NUM+'[日号]|大后天|后天|明天|明早|明晚|今天|今早|今晚')
+DATE_TOKEN=re.compile(r'\d{4}(?:年\d{1,2}月\d{1,2}日?|[-/]\d{1,2}[-/]\d{1,2})|'+WEEK+'(?:'+DAY+')?|(?:本月|这个月|下月|下个月)'+NUM+'[日号]|前天|昨天|昨日|大后天|后天|明天|明早|明晚|今天|今早|今晚')
 def plain(text):return re.sub(r'“[^”]*”|「[^」]*」|《[^》]*》|"[^"\n]*"','',text)
 def number(value):
  if value.isdigit():return int(value)
@@ -16,7 +16,7 @@ def number(value):
  raise ValueError('日期不合法，请检查日期数字')
 def resolve(value,clock):
  today=dt.date.fromisoformat(clock['date'])
- offsets={'today':0,'tomorrow':1,'day_after_tomorrow':2,'今天':0,'今早':0,'今晚':0,'明天':1,'明早':1,'明晚':1,'后天':2,'大后天':3}
+ offsets={'yesterday':-1,'day_before_yesterday':-2,'昨天':-1,'昨日':-1,'前天':-2,'today':0,'tomorrow':1,'day_after_tomorrow':2,'今天':0,'今早':0,'今晚':0,'明天':1,'明早':1,'明晚':1,'后天':2,'大后天':3}
  if not isinstance(value,str) or not value.strip():raise ValueError('请补充日程日期，例如下周二或完整年月日')
  value=value.strip()
  if value in offsets:return today+dt.timedelta(days=offsets[value])
