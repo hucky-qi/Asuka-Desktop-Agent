@@ -101,7 +101,7 @@ def install_guard(config_path):
             raise SafetyError('Isolation blocked subprocess/native-service escape')
     sys.addaudithook(audit)
 
-def launch(app,env,depport,appport,log,mock_open=False):
+def launch(app,env,depport,appport,log,mock_open=False,cwd=None):
     """Always called AFTER overlays. No reliance on a sitecustomize import succeeding."""
     app=Path(app).resolve()
     if type(depport) is not int or depport==11434 or type(appport) is not int or appport==8765:raise SafetyError('Explicit isolated ports required')
@@ -128,4 +128,4 @@ subprocess.run=external_open
         boot.write_text(original.replace(target,adapter+target))
     clean={k:v for k,v in env.items() if not k.startswith(('PYTHON','BAIDU_','DEEPSEEK_','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY','http_proxy','https_proxy','all_proxy'))}
     clean.update(OLLAMA_HOST=f'http://127.0.0.1:{depport}',DEEPSEEK_ENABLED='false',BAIDU_API_KEY='blackbox-nonsecret-placeholder',BAIDU_FREE_RESOURCES_CONFIRMED='true',BAIDU_LOCAL_DAILY_LIMIT='30',BAIDU_TEST_MODE='true',BAIDU_TEST_LIMIT='7')
-    return subprocess.Popen([sys.executable,'-I','-u',str(boot)],cwd=app,env=clean,stdout=log,stderr=log)
+    return subprocess.Popen([sys.executable,'-I','-u',str(boot)],cwd=app if cwd is None else cwd,env=clean,stdout=log,stderr=log)

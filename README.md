@@ -129,3 +129,8 @@ cd ..
 默认离线，mock依赖、独立数据及最终出站保护；缺mock失败，不访问真实模型/百度/私人日历。当前安装与各测试结果见[TESTING](docs/TESTING.md)，人工验收见[MANUAL_ACCEPTANCE](docs/MANUAL_ACCEPTANCE.md)。真实测试另需明确次数/费用/数据范围，在出站前预占；不在快速测试自动付费。
 
 本轮不声明普遍偏好遵循、一般知识正确率或语义准确率。结构化偏好请求原16271字节，先降至15211；本次精简重复枚举与说明后，同一短问题14568字节，16000保护未提高，超限不自动重试；复杂知识/表格/语气仍有既有限制。大型任务性能和内存只是既有有限观测，不是绝对峰值或保证。Windows、当前干净原生点击/通知/麦克风与睡眠组合未验收。后续先完成公开安装和原生集中验收，其他业务不在本轮扩大。
+
+
+## 源码目录与开发命令
+
+[目录说明](docs/README.md#directory-layout)统一维护结构和数据路径。启动仍为 `.venv/bin/python start.py --web-only` 或 `.venv/bin/python launch_desktop.py`；从其他目录可传上述脚本的绝对路径。`app.py`、`desktop_pet.py`仅保留必要命令兼容，业务源码已归包。默认离线测试仍为 `.venv/bin/python run_tests.py`；Live2D状态测试为 `node --test tests/live2d/state-controller.test.mjs`。测试运行输出不进入发布清单。

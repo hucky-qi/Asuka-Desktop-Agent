@@ -14,6 +14,12 @@ class LayoutTests(unittest.TestCase):
    fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
    r=subprocess.run([sys.executable,str(PROJECT/'desktop_pet.py'),'--bubble-chat'],cwd=cwd,capture_output=True,text=True,timeout=8)
    self.assertEqual(r.returncode,0,r.stderr);self.assertIn('已运行',r.stdout)
+ def test_synthetic_runtime_uses_packaged_scheduler_without_notifications(self):
+  from backend.calendar import reminder_test_service
+  service=reminder_test_service.runtime()
+  self.assertEqual(Path(service.__file__).resolve(),PROJECT/'backend/calendar/calendar_reminders.py')
+  self.assertEqual(service.PATH,PROJECT/'.runtime/reminder-tests/plans.json')
+  self.assertIsNone(service.WORKER)
  def test_resource_files_and_stable_entries_present(self):
   for name in ('bubble.html','index.html','input-guard.js','unified-web.js','speech-view.js','shared-reminder.js'):
    self.assertTrue((FRONTEND/name).is_file(),name)

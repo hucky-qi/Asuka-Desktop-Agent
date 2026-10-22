@@ -109,7 +109,7 @@ test('cancel and intermediate tool phases do not replay a search lean',()=>{
 
 // Tail-only gain preserves head/body and remains inside rig ranges.
 test('tail gain is bounded and leaves head/body parameters unchanged',async ()=>{
-  const {boostTailOutput}=await import('./state-controller.mjs');
+  const {boostTailOutput}=await import('../../live2d/state-controller.mjs');
   const values=[.4,3,.25];
   const model={getParameterValueByIndex:i=>values[i],getParameterMinimumValue:()=>-1,getParameterMaximumValue:()=>1,setParameterValueByIndex:(i,v)=>{values[i]=v}};
   boostTailOutput(model,new Map([['ParamHairSide',0]]),1.4);

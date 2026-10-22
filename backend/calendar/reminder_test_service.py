@@ -9,7 +9,7 @@ def runtime():
  global SERVICE
  with LOCK:
   if SERVICE:return SERVICE
-  spec=importlib.util.spec_from_file_location('synthetic_reminder_runtime',settings.PROJECT/'calendar_reminders.py');s=importlib.util.module_from_spec(spec);spec.loader.exec_module(s)
+  spec=importlib.util.spec_from_file_location('synthetic_reminder_runtime',Path(__file__).with_name('calendar_reminders.py'));s=importlib.util.module_from_spec(spec);spec.loader.exec_module(s)
   s.PATH=ROOT/'plans.json';s.settings=types.SimpleNamespace(**vars(settings));s.settings.REMINDER_POLL_SECONDS=1;s.enabled=lambda:True
   def read(eid,cid,cancel):
    if not eid.startswith('synthetic-') or cid!='synthetic-local':raise ValueError('不是隔离合成事件，未访问日历。')

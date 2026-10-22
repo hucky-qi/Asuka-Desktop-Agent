@@ -1,0 +1,666 @@
+{
+  "version": 1,
+  "note": "Only explicit paths. Public docs/notices/previously reviewed runtime assets from base, source code from current project; no private data or caches.",
+  "files": [
+    {
+      "path": ".env.example",
+      "origin": "base"
+    },
+    {
+      "path": ".gitignore",
+      "origin": "base"
+    },
+    {
+      "path": "AGENTS.md",
+      "origin": "base"
+    },
+    {
+      "path": "LICENSES.md",
+      "origin": "base"
+    },
+    {
+      "path": "README.md",
+      "origin": "base"
+    },
+    {
+      "path": "app.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/__init__.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/app.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/__init__.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/assistant_context.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/assistant_entry.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/assistant_file_qa.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/assistant_files.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/assistant_tasks.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/assistant_tools.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/assistant_understanding.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/assistant_web_search.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/bubble_chat.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/daily_chat.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/session_lifecycle.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/task_status.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/assistant/unified_web.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/__init__.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/assistant_calendar.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/calendar_create.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/calendar_dates.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/calendar_delete.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/calendar_reminders.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/calendar_semantics.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/calendar_update.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/notification_test_api.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/reminder_api.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/reminder_native.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/calendar/reminder_test_service.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/diagnostics.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/files/__init__.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/files/concept_review.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/files/file_reader.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/files/file_relationships.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/files/file_tools.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/files/identifier_intent.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/files/retrieval_cache.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/files/retrieval_evidence.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/files/search_intent.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/files/search_retrieval.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/files/semantic_search.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/memory/__init__.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/memory/assistant_memory.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/memory/bubble_memory.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/memory/daily_records.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/memory/memory_learning.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/memory/preference_application.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/memory/style_preferences.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/native_context.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/persona.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/preferences.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/providers/__init__.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/providers/baidu_config.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/providers/baidu_error_log.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/providers/bubble_web.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/providers/cloud_access.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/providers/cloud_test_budget.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/providers/model_dispatch.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/providers/model_providers.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/providers/web_usage.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/settings.py",
+      "origin": "source"
+    },
+    {
+      "path": "build_index.py",
+      "origin": "source"
+    },
+    {
+      "path": "desktop_pet.py",
+      "origin": "source"
+    },
+    {
+      "path": "docs/CALENDAR.md",
+      "origin": "base"
+    },
+    {
+      "path": "docs/DESKTOP.md",
+      "origin": "base"
+    },
+    {
+      "path": "docs/MANUAL_ACCEPTANCE.md",
+      "origin": "base"
+    },
+    {
+      "path": "docs/MODELS_AND_WEB.md",
+      "origin": "base"
+    },
+    {
+      "path": "docs/README.md",
+      "origin": "base"
+    },
+    {
+      "path": "docs/ROADMAP.md",
+      "origin": "base"
+    },
+    {
+      "path": "docs/SEARCH.md",
+      "origin": "base"
+    },
+    {
+      "path": "docs/TESTING.md",
+      "origin": "base"
+    },
+    {
+      "path": "frontend/bubble.html",
+      "origin": "source"
+    },
+    {
+      "path": "frontend/calendar-view.js",
+      "origin": "source"
+    },
+    {
+      "path": "frontend/daily-settings.js",
+      "origin": "source"
+    },
+    {
+      "path": "frontend/file-qa-view.js",
+      "origin": "source"
+    },
+    {
+      "path": "frontend/index.html",
+      "origin": "source"
+    },
+    {
+      "path": "frontend/input-guard.js",
+      "origin": "source"
+    },
+    {
+      "path": "frontend/memory-view.js",
+      "origin": "source"
+    },
+    {
+      "path": "frontend/persona-view.js",
+      "origin": "source"
+    },
+    {
+      "path": "frontend/reminder-notifications.html",
+      "origin": "source"
+    },
+    {
+      "path": "frontend/shared-reminder.js",
+      "origin": "source"
+    },
+    {
+      "path": "frontend/speech-view.js",
+      "origin": "source"
+    },
+    {
+      "path": "frontend/unified-web.js",
+      "origin": "source"
+    },
+    {
+      "path": "launch_desktop.py",
+      "origin": "source"
+    },
+    {
+      "path": "live2d/SDK_NOTICES.md",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/asuka-model-config.json",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/build.mjs",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/chat-bridge.mjs",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/index.html",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/main.ts",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/models/Asuka/Asuka_Idle_Tails.physics3.json",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/models/Asuka/Asuka_Tilt_Hair_Work.1024/texture_00.png",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/models/Asuka/Asuka_Tilt_Hair_Work.cdi3.json",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/models/Asuka/Asuka_Tilt_Hair_Work.moc3",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/models/Asuka/Asuka_Tilt_Hair_Work.model3.json",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/models/Asuka/NOTICE.md",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/models/Asuka/manifest.json",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/package-lock.json",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/package.json",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/prepare.py",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/run-asuka-bubble.command",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/server.py",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/state-controller.mjs",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/static-body.ts",
+      "origin": "base"
+    },
+    {
+      "path": "live2d/waiting-bubble.mjs",
+      "origin": "base"
+    },
+    {
+      "path": "macos/AsukaLauncher.swift",
+      "origin": "source"
+    },
+    {
+      "path": "macos/Icon.swift",
+      "origin": "source"
+    },
+    {
+      "path": "macos/InstallSpeechAssets.swift",
+      "origin": "source"
+    },
+    {
+      "path": "macos/__init__.py",
+      "origin": "source"
+    },
+    {
+      "path": "macos/create_desktop_app.py",
+      "origin": "base"
+    },
+    {
+      "path": "macos/desktop_entry.py",
+      "origin": "source"
+    },
+    {
+      "path": "macos/desktop_pet.py",
+      "origin": "source"
+    },
+    {
+      "path": "macos/desktop_pet.swift",
+      "origin": "source"
+    },
+    {
+      "path": "macos/ocr_vision.swift",
+      "origin": "source"
+    },
+    {
+      "path": "macos/speech_native.py",
+      "origin": "source"
+    },
+    {
+      "path": "macos/swift_build.py",
+      "origin": "source"
+    },
+    {
+      "path": "project_paths.py",
+      "origin": "source"
+    },
+    {
+      "path": "requirements-dev.txt",
+      "origin": "source"
+    },
+    {
+      "path": "requirements-lock.txt",
+      "origin": "base"
+    },
+    {
+      "path": "requirements.txt",
+      "origin": "source"
+    },
+    {
+      "path": "run-blackbox.command",
+      "origin": "base"
+    },
+    {
+      "path": "run_tests.py",
+      "origin": "source"
+    },
+    {
+      "path": "start.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/__init__.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/EXPECTATIONS.json",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/freeze.json",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/layout.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/run.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/ui.html",
+      "origin": "source"
+    },
+    {
+      "path": "tests/live2d/state-controller.test.mjs",
+      "origin": "source"
+    },
+    {
+      "path": "tests/safety/EXPECTATIONS.json",
+      "origin": "source"
+    },
+    {
+      "path": "tests/safety/policy.json",
+      "origin": "source"
+    },
+    {
+      "path": "tests/safety/run.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/safety/safety.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/__init__.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_accuracy_constraints.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_app.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_baidu_auth_offline.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_baidu_budget30.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_baidu_config.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_baidu_navigation.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_bubble_chat.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_bubble_extensions.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_desktop_entry.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_install_ports.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_layout.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_mac_acceptance.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_performance_provider.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_search_a1.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_search_a2.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_search_balance.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_search_state_closure.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_task_status.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_upgrade.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_wire_contract.py",
+      "origin": "source"
+    },
+    {
+      "path": "tools/export_release_candidate.py",
+      "origin": "source"
+    },
+    {
+      "path": "tools/release_manifest.json",
+      "origin": "source"
+    },
+    {
+      "path": "tools/speech_assets.py",
+      "origin": "source"
+    },
+    {
+      "path": "tools/verify_live2d.py",
+      "origin": "source"
+    },
+    {
+      "path": "tools/verify_release.py",
+      "origin": "source"
+    }
+  ]
+}
