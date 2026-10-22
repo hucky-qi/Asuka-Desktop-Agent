@@ -293,10 +293,11 @@ def port():
 def prepare(runroot,appport,depport):
  app=runroot/'app';app.mkdir(parents=True);fixtures=app/'fixtures';fixtures.mkdir()
  for f in P.glob('*.py'):shutil.copy2(f,app/f.name)
+ shutil.copytree(P/'backend',app/'backend',ignore=shutil.ignore_patterns('__pycache__'))
  shutil.copytree(P/'frontend',app/'frontend')
  shutil.copytree(P/'macos',app/'macos',ignore=shutil.ignore_patterns('__pycache__','*.app'))
  # Isolated deployment configuration only; no algorithm or internal state mutation.
- with (app/'settings.py').open('a') as f:f.write(f'\n# Black-box isolated deployment configuration\nPORT={appport}\nWORKSPACE=PROJECT/"fixtures"\nSEARCH_ROOTS={{"workspace":WORKSPACE,"desktop":WORKSPACE/"desktop"}}\nSEMANTIC_DB=PROJECT/".semantic_index.sqlite3"\n')
+ with (app/'backend/settings.py').open('a') as f:f.write(f'\n# Black-box isolated deployment configuration\nPORT={appport}\nWORKSPACE=PROJECT/"fixtures"\nSEARCH_ROOTS={{"workspace":WORKSPACE,"desktop":WORKSPACE/"desktop"}}\nSEMANTIC_DB=PROJECT/".semantic_index.sqlite3"\n')
  for name,text in {'野餐清单.txt':'野餐需要水、苹果和餐垫。','ZX8427野餐清单.txt':'项目ZX8427户外用品。','ZX8428野餐清单.txt':'另一个项目编号。','无关账单.txt':'五月电费账单。'}.items():(fixtures/name).write_text(text)
  from reportlab.pdfgen import canvas
  for name in ('野餐清单.pdf','ZX8427野餐清单.pdf','ZX8428野餐清单.pdf'):
@@ -308,10 +309,10 @@ def prepare(runroot,appport,depport):
  (fixtures/'animation.swift').write_text('// unrelated source code')
  (fixtures/'desktop').mkdir();(fixtures/'desktop'/'野餐清单.txt').write_text('桌面目录野餐清单。')
  # Route just the external web transport to a loopback HTTP simulator.
- f=app/'bubble_web.py';s=f.read_text();endpoint='https://qianfan.baidubce.com/v2/ai_search/web_search';assert endpoint in s;s=s.replace(endpoint,f'http://127.0.0.1:{depport}/web_search');f.write_text(s)
+ f=app/'backend/providers/bubble_web.py';s=f.read_text();endpoint='https://qianfan.baidubce.com/v2/ai_search/web_search';assert endpoint in s;s=s.replace(endpoint,f'http://127.0.0.1:{depport}/web_search');f.write_text(s)
  # Preserve real history in an isolated copy; never alter the formal ledger.
  (app/'.bubble-web-usage.json').write_text(json.dumps({'attempts':[time.time()],'test_attempts':7}))
- for localfile in app.glob('*.py'):
+ for localfile in app.rglob('*.py'):
   code=localfile.read_text();code=code.replace("host='http://127.0.0.1:11434'",f"host='http://127.0.0.1:{depport}'");localfile.write_text(code)
  env={k:v for k,v in os.environ.items() if not k.startswith(('BAIDU_','DEEPSEEK_','BUBBLE_WEB_','OLLAMA_'))}
  env.update(OLLAMA_HOST=f'http://127.0.0.1:{depport}',BUBBLE_WEB_ENABLED='true',BAIDU_FREE_RESOURCES_CONFIRMED='true',BAIDU_API_KEY='blackbox-nonsecret-placeholder',BAIDU_LOCAL_DAILY_LIMIT='30',BAIDU_TEST_MODE='true',BAIDU_TEST_LIMIT='7',MODEL_PROVIDER='ollama',DEEPSEEK_ENABLED='false')

@@ -8,10 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from contextlib import closing
 
-import app
-import file_tools
-import semantic_search
-import settings
+import backend.app as app
+import backend.files.file_tools as file_tools
+import backend.files.semantic_search as semantic_search
+import backend.settings as settings
 import start
 from tests.unit.test_app import LocalAssistantTests
 

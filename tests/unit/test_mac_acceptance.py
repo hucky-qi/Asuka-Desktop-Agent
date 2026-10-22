@@ -6,11 +6,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import app
-import file_relationships
-import file_tools
-import settings
-import swift_build
+import backend.app as app
+import backend.files.file_relationships as file_relationships
+import backend.files.file_tools as file_tools
+import backend.settings as settings
+import macos.swift_build as swift_build
 
 
 class MacAcceptanceTests(unittest.TestCase):

@@ -3,7 +3,7 @@ import json,os,sys,tempfile,time,threading,subprocess,unittest
 from pathlib import Path
 from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
-import web_usage as u,bubble_web as w
+import backend.providers.web_usage as u, backend.providers.bubble_web as w
 class Response:
  def __enter__(self):return self
  def __exit__(self,*a):pass

@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace as NS
-import bubble_web as w,web_usage as u,bubble_chat as b,app,settings
+import backend.providers.bubble_web as w, backend.providers.web_usage as u, backend.assistant.bubble_chat as b, backend.app as app, backend.settings as settings
 class Response:
  def __enter__(self):return self
  def __exit__(self,*args):pass
@@ -75,7 +75,7 @@ class BaiduTests(unittest.TestCase):
  def test_structured_search_reuses_file_session(self):
   root=Path(self.tmp.name);(root/'test.pdf').write_text('pdf');(root/'test.txt').write_text('text')
   state=app.Session()
-  with patch.object(settings,'SEARCH_ROOTS',{'workspace':root}),patch('preferences.custom_scopes',return_value={}):
+  with patch.object(settings,'SEARCH_ROOTS',{'workspace':root}),patch('backend.preferences.custom_scopes',return_value={}):
    event=app.structured_search({'keyword':'test','scope':'workspace','extensions':['pdf'],'sort_by':'modified_desc'},state)
    self.assertEqual([x['name'] for x in event['results']],['test.pdf']);self.assertEqual(state.last_search_results,event['results']);self.assertTrue(state.last_search_query)
   with self.assertRaises(ValueError):app.structured_search({'min_size':-1},state)

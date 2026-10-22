@@ -4,7 +4,7 @@ from pathlib import Path
 from array import array
 from types import SimpleNamespace as NS
 from unittest.mock import patch
-import app,settings,search_retrieval,semantic_search,retrieval_cache,concept_review,file_tools,diagnostics
+import backend.app as app, backend.settings as settings, backend.files.search_retrieval as search_retrieval, backend.files.semantic_search as semantic_search, backend.files.retrieval_cache as retrieval_cache, backend.files.concept_review as concept_review, backend.files.file_tools as file_tools, backend.diagnostics as diagnostics
 from tests.unit import test_accuracy_constraints as fixtures
 
 class BalanceTests(unittest.TestCase):

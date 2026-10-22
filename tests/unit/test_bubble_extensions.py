@@ -2,7 +2,7 @@ import unittest,tempfile,threading,json,os
 from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace as NS
-import bubble_chat as b,bubble_memory as m,bubble_web as w,web_usage as u
+import backend.assistant.bubble_chat as b, backend.memory.bubble_memory as m, backend.providers.bubble_web as w, backend.providers.web_usage as u
 class Provider:
  def __init__(self):self.calls=[]
  def chat(self,**kw):self.calls.append(kw);yield NS(message=NS(content='测试回答'))
@@ -29,7 +29,7 @@ class Extensions(unittest.TestCase):
   with self.assertRaises(ValueError):m.command('记住：新事实')
   self.assertEqual(m.PATH.read_bytes(),before)
  def test_unconfigured_never_network_and_query_privacy(self):
-  with patch.dict(os.environ,{},clear=True),patch('bubble_web.urlopen') as net:
+  with patch.dict(os.environ,{},clear=True),patch('backend.providers.bubble_web.urlopen') as net:
    with self.assertRaises(ValueError):w.search('搜索天气',threading.Event())
    net.assert_not_called()
   for q in ['搜索 /Users/private/a.txt','搜索 api_key=secret']:

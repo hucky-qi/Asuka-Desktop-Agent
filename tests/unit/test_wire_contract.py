@@ -1,6 +1,6 @@
 """Pure wire regression; public HTTP/behavior coverage is documented in TESTING."""
 import copy,json,unittest
-import calendar_semantics,preference_application,persona,memory_learning
+import backend.calendar.calendar_semantics as calendar_semantics, backend.memory.preference_application as preference_application, backend.persona as persona, backend.memory.memory_learning as memory_learning
 
 def validation(value):
  if isinstance(value,dict):return {k:validation(v) for k,v in value.items() if k!='description'}

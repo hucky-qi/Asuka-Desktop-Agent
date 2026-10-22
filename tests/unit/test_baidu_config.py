@@ -1,7 +1,7 @@
 import unittest,tempfile,json,threading
 from pathlib import Path
 from unittest.mock import patch
-import baidu_config as c,bubble_web as w
+import backend.providers.baidu_config as c, backend.providers.bubble_web as w
 class ConfigTests(unittest.TestCase):
  def test_alias_precedence_quotes_and_no_execution(self):
   with tempfile.TemporaryDirectory(dir=Path('acceptance/baidu-real')) as d:
@@ -20,6 +20,6 @@ class ConfigTests(unittest.TestCase):
    def read(self,*a):return b'{"references":[{"title":"Title","url":"https://example.org","snippet":"summary only"}]}'
   requests=[]
   def send(req,timeout):requests.append(req);return Response()
-  with patch.dict(os.environ,{'BUBBLE_WEB_ENABLED':'true','BAIDU_FREE_RESOURCES_CONFIRMED':'true','BAIDU_APPBUILDER_API_KEY':'mock-only'}),patch('web_usage.dispatch',side_effect=lambda send,cancel:send()):
+  with patch.dict(os.environ,{'BUBBLE_WEB_ENABLED':'true','BAIDU_FREE_RESOURCES_CONFIRMED':'true','BAIDU_APPBUILDER_API_KEY':'mock-only'}),patch('backend.providers.web_usage.dispatch',side_effect=lambda send,cancel:send()):
    data=w.search('公开问题',threading.Event(),send)
   self.assertEqual(requests[0].get_header('Authorization'),'Bearer mock-only');self.assertEqual(data[0]['snippet'],'summary only')

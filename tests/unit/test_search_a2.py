@@ -3,7 +3,7 @@ from pathlib import Path
 from array import array
 from types import SimpleNamespace as NS
 from unittest.mock import patch
-import settings,app,file_tools,search_intent,semantic_search,identifier_intent
+import backend.settings as settings, backend.app as app, backend.files.file_tools as file_tools, backend.files.search_intent as search_intent, backend.files.semantic_search as semantic_search, backend.files.identifier_intent as identifier_intent
 from tests.unit import test_accuracy_constraints as fixtures
 
 class A2Tests(unittest.TestCase):

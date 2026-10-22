@@ -21,14 +21,14 @@ try:
 except ModuleNotFoundError:
     sys.modules["ollama"] = SimpleNamespace(chat=lambda **kwargs: None, embed=lambda **kwargs: None)
 
-import app
-import desktop_pet
-import file_reader
-import file_relationships
-import file_tools
-import preferences
-import settings
-import semantic_search
+import backend.app as app
+import macos.desktop_pet as desktop_pet
+import backend.files.file_reader as file_reader
+import backend.files.file_relationships as file_relationships
+import backend.files.file_tools as file_tools
+import backend.preferences as preferences
+import backend.settings as settings
+import backend.files.semantic_search as semantic_search
 
 
 class LocalAssistantTests(unittest.TestCase):

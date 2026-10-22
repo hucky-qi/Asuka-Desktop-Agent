@@ -1,7 +1,7 @@
 import unittest,tempfile,threading,json,os
 from pathlib import Path
 from unittest.mock import patch
-import task_status as t,bubble_chat as b,bubble_web as w,web_usage as u
+import backend.assistant.task_status as t, backend.assistant.bubble_chat as b, backend.providers.bubble_web as w, backend.providers.web_usage as u
 class TaskStateTests(unittest.TestCase):
  def setUp(self):
   with t.LOCK:t.TASKS.clear();t.CURRENT.clear();t.LAST_COMPLETE=0

@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 from array import array
 from tests.unit import test_accuracy_constraints as fixtures
-import app,search_intent,semantic_search,settings
+import backend.app as app, backend.files.search_intent as search_intent, backend.files.semantic_search as semantic_search, backend.settings as settings
 
 class A1Tests(unittest.TestCase):
  setUp=fixtures.HardConstraintTests.setUp

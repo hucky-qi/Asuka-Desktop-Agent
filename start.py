@@ -9,11 +9,11 @@ import time
 import urllib.request
 from pathlib import Path
 
-import settings
+import backend.settings as settings
 
 
 def ensure_backend():
-    from baidu_config import load
+    from backend.providers.baidu_config import load
     load()
     address = f"http://{settings.HOST}:{settings.PORT}"
     try:

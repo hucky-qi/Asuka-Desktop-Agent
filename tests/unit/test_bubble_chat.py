@@ -1,7 +1,7 @@
 import unittest,threading
 from types import SimpleNamespace as NS
 from unittest.mock import patch
-import bubble_chat as b
+import backend.assistant.bubble_chat as b
 
 class Provider:
  def __init__(self):self.calls=[]

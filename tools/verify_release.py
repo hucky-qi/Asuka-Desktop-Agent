@@ -27,6 +27,12 @@ if __name__=='__main__':
     base=f'http://127.0.0.1:{appport}';bb.wait_for(lambda:get(base,'/api/health'),10)
     assert b'<!doctype' in get(base,'/').lower()
     assert b'<html' in get(base,'/bubble').lower()
+    import hashlib
+    for name in ('speech-view.js','shared-reminder.js','input-guard.js','unified-web.js','calendar-view.js'):
+     assert get(base,'/'+name)==(P/'frontend'/name).read_bytes(),name
+    assert get(base,'/reminder-notifications')==(P/'frontend/reminder-notifications.html').read_bytes()
+    # The complete page is an unchanged extracted asset; all paths remain root URLs.
+    assert get(base,'/')==(P/'frontend/index.html').read_bytes()
     config=json.loads(get(base,'/api/bubble/config'));assert not config.get('web_configured')
     result=json.loads(get(base,'/api/files/search',{'scope':'workspace','keyword':'ZX8427','extensions':['pdf']}))
     rows=[r for e in result.get('events',[]) for r in e.get('results',[])];assert rows and all('ZX8427' in r['path'] and r['path'].endswith('.pdf') for r in rows)

@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 P=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(P))
-from swift_build import compile_helper
+from macos.swift_build import compile_helper
 
 def main():
  parser=argparse.ArgumentParser(description=__doc__)

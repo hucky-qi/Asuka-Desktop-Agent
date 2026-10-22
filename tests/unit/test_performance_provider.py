@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch,Mock
 from array import array
-import app,diagnostics,file_tools,semantic_search,settings,search_intent,retrieval_cache,model_providers
+import backend.app as app, backend.diagnostics as diagnostics, backend.files.file_tools as file_tools, backend.files.semantic_search as semantic_search, backend.settings as settings, backend.files.search_intent as search_intent, backend.files.retrieval_cache as retrieval_cache, backend.providers.model_providers as model_providers
 
 class PerformanceTests(unittest.TestCase):
  def setUp(self):
@@ -41,7 +41,7 @@ class PerformanceTests(unittest.TestCase):
  def test_native_dot_matches_reference(self):
   a=array('f',[.1,.2,.3]);b=array('f',[.2,.3,.4]);self.assertAlmostEqual(retrieval_cache.dot(a,b),sum(x*y for x,y in zip(a,b)),places=6)
  def test_content_reuses_existing_text_without_reparse(self):
-  import file_reader
+  import backend.files.file_reader as file_reader
   path=self.root/'resume 简历.txt';stat=path.stat()
   with semantic_search.connect() as db:
    db.execute('INSERT INTO documents(path,mtime_ns,size,model,indexed_at) VALUES(?,?,?,?,?)',(str(path),stat.st_mtime_ns,stat.st_size,settings.EMBED_MODEL,1))

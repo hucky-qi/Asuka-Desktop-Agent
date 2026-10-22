@@ -53,7 +53,7 @@ ollama pull qwen3.5:9b
 ollama pull qwen3-embedding:0.6b
 ```
 
-`settings.py`的`MODEL`与`EMBED_MODEL`分别控制聊天/复核模型和向量模型。通过气泡或网页的设置选择本地Qwen，云端失败不会替你切换。既有本地正文复核可能需要Qwen；不把它宣称已全部迁到DeepSeek。未安装模型时仍可启动并查看配置，不能宣称检索语义质量已保证。
+`backend/settings.py`的`MODEL`与`EMBED_MODEL`分别控制聊天/复核模型和向量模型。通过气泡或网页的设置选择本地Qwen，云端失败不会替你切换。既有本地正文复核可能需要Qwen；不把它宣称已全部迁到DeepSeek。未安装模型时仍可启动并查看配置，不能宣称检索语义质量已保证。
 
 ## 搜索目录、索引与文件问答
 

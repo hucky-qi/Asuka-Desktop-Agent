@@ -105,7 +105,7 @@ def launch(app,env,depport,appport,log,mock_open=False):
     """Always called AFTER overlays. No reliance on a sitecustomize import succeeding."""
     app=Path(app).resolve()
     if type(depport) is not int or depport==11434 or type(appport) is not int or appport==8765:raise SafetyError('Explicit isolated ports required')
-    for f in app.glob('*.py'):
+    for f in app.rglob('*.py'):
         f.write_text(f.read_text().replace("host='http://127.0.0.1:11434'",f"host='http://127.0.0.1:{depport}'"))
     # Remove old optional guard: startup must fail loudly, not ignore import errors.
     (app/'sitecustomize.py').unlink(missing_ok=True)

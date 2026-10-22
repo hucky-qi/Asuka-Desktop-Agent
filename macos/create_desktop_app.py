@@ -3,7 +3,7 @@ from pathlib import Path
 import argparse,plistlib,subprocess,sys,os,shutil,time
 PROJECT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(PROJECT))
-from swift_build import compile_helper
+from macos.swift_build import compile_helper
 BUILD=PROJECT/'.runtime/desktop-app-build'
 
 def create(icon_source,destination):

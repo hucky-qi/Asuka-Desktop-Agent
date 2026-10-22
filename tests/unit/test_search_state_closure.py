@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-import app
+import backend.app as app
 
 class SearchSnapshotTests(unittest.TestCase):
     def rows(self,n):

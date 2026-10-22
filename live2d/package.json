@@ -1,6 +1,6 @@
 {
   "name": "local-file-chat-live2d-prototype",
   "private": true,
-  "scripts": {"build": "node build.mjs"},
+  "scripts": {"build": "node build.mjs", "test": "node --test ../tests/live2d/state-controller.test.mjs"},
   "devDependencies": {"esbuild": "0.25.12"}
 }

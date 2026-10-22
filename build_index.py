@@ -2,7 +2,7 @@
 
 import argparse
 
-import semantic_search
+import backend.files.semantic_search as semantic_search
 
 
 def main():

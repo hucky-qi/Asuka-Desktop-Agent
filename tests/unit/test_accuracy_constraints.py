@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace as NS
 from array import array
-import app,settings,search_intent,file_tools,semantic_search
+import backend.app as app, backend.settings as settings, backend.files.search_intent as search_intent, backend.files.file_tools as file_tools, backend.files.semantic_search as semantic_search
 
 class HardConstraintTests(unittest.TestCase):
  def setUp(self):

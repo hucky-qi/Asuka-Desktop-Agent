@@ -1,7 +1,7 @@
 """Distribution entry. Optional local Live2D; otherwise native blue fallback."""
 from pathlib import Path
 import sys,subprocess,time,urllib.request,json
-import settings
+import backend.settings as settings
 from start import ensure_backend
 P=Path(__file__).resolve().parent
 
