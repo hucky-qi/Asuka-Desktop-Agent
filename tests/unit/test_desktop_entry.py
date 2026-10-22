@@ -1,10 +1,10 @@
 import importlib.util,json,tempfile,unittest,fcntl
 from pathlib import Path
 from unittest.mock import patch,Mock
-spec=importlib.util.spec_from_file_location('entry',Path(__file__).with_name('desktop_entry.py'));entry=importlib.util.module_from_spec(spec);spec.loader.exec_module(entry)
+spec=importlib.util.spec_from_file_location('entry',Path(__file__).resolve().parents[2]/'macos/desktop_entry.py');entry=importlib.util.module_from_spec(spec);spec.loader.exec_module(entry)
 class EntryTests(unittest.TestCase):
  def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]/'acceptance/desktop-entry');self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name);self.runtime=self.root/'runtime';self.runtime.mkdir();self.command=self.root/'run.command';self.command.write_text('mock only')
+  self.tmp=tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[2]/'acceptance/desktop-entry');self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name);self.runtime=self.root/'runtime';self.runtime.mkdir();self.command=self.root/'run.command';self.command.write_text('mock only')
   for name,value in [('PROJECT',self.root),('RUNTIME',self.runtime),('ENTRY',self.command),('LOG',self.runtime/'log'),('STATE',self.runtime/'state.json')]:
    p=patch.object(entry,name,value);p.start();self.addCleanup(p.stop)
  def test_existing_pet_runs_current_command_without_terminal(self):
@@ -37,7 +37,7 @@ class BuilderSafetyTests(unittest.TestCase):
  def test_existing_foreign_app_is_never_overwritten(self):
   import plistlib
   from macos import create_desktop_app as builder
-  with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[1]/'acceptance/desktop-entry') as root:
+  with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[2]/'acceptance/desktop-entry') as root:
    app=Path(root)/'Other.app';(app/'Contents').mkdir(parents=True)
    plist=app/'Contents/Info.plist';original=plistlib.dumps({'CFBundleIdentifier':'another.project'})
    plist.write_bytes(original)

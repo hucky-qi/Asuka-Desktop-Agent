@@ -62,3 +62,8 @@ acceptance/release-blockers/
 *.wav
 *.m4a
 *.bak
+
+# Relocated test runtime evidence stays local
+tests/**/baseline-*/
+tests/**/offline-*/
+tests/safety/real-budget*

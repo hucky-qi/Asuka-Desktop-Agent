@@ -24,7 +24,7 @@ class MacAcceptanceTests(unittest.TestCase):
             self.assertEqual(run.call_count, 2)
             self.assertIn('/sdk', run.call_args.args[0])
             self.assertEqual(run.call_args.kwargs['env']['SWIFT_USE_OLD_DRIVER'], '1')
-            self.assertTrue(Path(run.call_args.kwargs['env']['TMPDIR']).is_relative_to(directory))
+            self.assertTrue(Path(run.call_args.kwargs['env']['TMPDIR']).is_relative_to(settings.PROJECT / '.swift-build'))
 
     def test_clear_first_inflight_request_discards_its_server_session(self):
         key, state = app.session_for(None)

@@ -2,7 +2,7 @@
 import json,os,subprocess,sys,tempfile,threading,unittest,shutil
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
-P=Path(__file__).resolve().parent
+P=Path(__file__).resolve().parents[2]
 class Health(BaseHTTPRequestHandler):
  def log_message(self,*args):pass
  def do_GET(self):
@@ -21,7 +21,7 @@ class InstallPorts(unittest.TestCase):
  def test_foreign_resource_server_is_not_reused(self):
   with tempfile.TemporaryDirectory() as folder:
    root=Path(folder).resolve()
-   for name in ('settings.py','launch_desktop.py','start.py','baidu_config.py'):shutil.copyfile(P/name,root/name)
+   for name in ('settings.py','project_paths.py','launch_desktop.py','start.py','baidu_config.py'):shutil.copyfile(P/name,root/name)
    (root/'live2d/.runtime').mkdir(parents=True);(root/'live2d/.runtime/prototype.js').write_text('// test-only readiness marker; never executed')
    backend=ThreadingHTTPServer(('127.0.0.1',0),Health);backend.payload={'service':'local-file-chat','project':str(root)}
    resource=ThreadingHTTPServer(('127.0.0.1',0),Health);resource.payload={'service':'local-file-chat-live2d-static','root':str(root/'foreign')}

@@ -6,7 +6,8 @@ from pathlib import Path
 
 
 def compile_helper(source, binary):
-    directory = Path(source).resolve().parent / ".swift-build"
+    from project_paths import SWIFT_CACHE
+    directory = SWIFT_CACHE
     directory.mkdir(exist_ok=True)
     environment = dict(os.environ, TMPDIR=str(directory) + "/")
     sdk = subprocess.check_output(["xcrun", "--show-sdk-path"], text=True).strip()

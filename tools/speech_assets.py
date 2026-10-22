@@ -13,7 +13,7 @@ def main():
  args=parser.parse_args()
  if sys.platform!='darwin':parser.exit(1,'此原生语音仅支持macOS，其他平台请使用文字输入。\n')
  binary=P/'.runtime/speech-tools/install-speech-assets';binary.parent.mkdir(parents=True,exist_ok=True)
- source=P/'tools/InstallSpeechAssets.swift'
+ source=P/'macos/InstallSpeechAssets.swift'
  if not binary.exists() or source.stat().st_mtime_ns>binary.stat().st_mtime_ns:compile_helper(source,binary)
  return subprocess.run([str(binary),'--install' if args.install else '--status']).returncode
 if __name__=='__main__':

@@ -1,7 +1,7 @@
 """Read only explicitly authorized dotenv path; never execute/interpolate contents."""
 import json,os,re,shlex
 from pathlib import Path
-PROJECT=Path(__file__).resolve().parent
+from project_paths import PROJECT
 ENV_PATH=PROJECT/'.env'
 FLAGS_PATH=PROJECT/'.baidu-search-config.json'
 ALLOWED={'BAIDU_API_KEY','BAIDU_APPBUILDER_API_KEY','BUBBLE_WEB_ENABLED','BAIDU_FREE_RESOURCES_CONFIRMED','BAIDU_LOCAL_DAILY_LIMIT','BAIDU_TEST_MODE','BAIDU_TEST_LIMIT'}

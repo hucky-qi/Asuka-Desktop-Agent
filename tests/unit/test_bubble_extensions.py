@@ -8,7 +8,7 @@ class Provider:
  def chat(self,**kw):self.calls.append(kw);yield NS(message=NS(content='测试回答'))
 class Extensions(unittest.TestCase):
  def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory(dir=Path(__file__).parent/'acceptance/b-memory-web');self.patch=patch.object(m,'PATH',Path(self.tmp.name)/'memory.json');self.patch.start();b.SESSIONS.clear();self.usage_patches=[patch.object(u,'PATH',Path(self.tmp.name)/'usage.json'),patch.object(u,'LOCK_PATH',Path(self.tmp.name)/'usage.lock')];[x.start() for x in self.usage_patches]
+  self.tmp=tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parents[2]/'acceptance/b-memory-web');self.patch=patch.object(m,'PATH',Path(self.tmp.name)/'memory.json');self.patch.start();b.SESSIONS.clear();self.usage_patches=[patch.object(u,'PATH',Path(self.tmp.name)/'usage.json'),patch.object(u,'LOCK_PATH',Path(self.tmp.name)/'usage.lock')];[x.start() for x in self.usage_patches]
  def tearDown(self):self.patch.stop();[x.stop() for x in self.usage_patches];self.tmp.cleanup()
  def job(self,q,sid=None,rid='r',web=False):return b.prepare({'question':q,'session_id':sid,'request_id':rid,'web_enabled':web})
  def test_history_pairs_reset_cancel_and_restart_memory(self):

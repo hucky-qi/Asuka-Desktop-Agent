@@ -17,8 +17,8 @@ OCR_BUILD_LOCK = threading.Lock()
 
 
 def ocr_command():
-    source = Path(__file__).with_name("ocr_vision.swift")
-    binary = Path(__file__).with_name(".ocr_vision")
+    source = (settings.MACOS / "ocr_vision.swift")
+    binary = (settings.PROJECT / ".ocr_vision")
     if not source.exists():
         raise RuntimeError("缺少 ocr_vision.swift")
     with OCR_BUILD_LOCK:

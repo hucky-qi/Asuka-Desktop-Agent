@@ -4,7 +4,7 @@ import tempfile,subprocess,sys,os,json,socket,time,threading
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from urllib.request import urlopen,Request
 P=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(P/'acceptance/blackbox-concurrency'))
+sys.path.insert(0,str(P/'tests/http'))
 import run as bb
 class Trap(BaseHTTPRequestHandler):
  count=0
@@ -17,7 +17,7 @@ if __name__=='__main__':
  with tempfile.TemporaryDirectory() as folder:
   appport=bb.port();app,env=bb.prepare(Path(folder),appport,dep.server_port)
   import shutil
-  shutil.copy2(P/'acceptance/test-safety/safety.py',app/'_test_safety.py')
+  shutil.copy2(P/'tests/safety/safety.py',app/'_test_safety.py')
   (app/'_isolation.json').write_text(json.dumps({'connect':[['127.0.0.1',dep.server_port]],'listen':[['127.0.0.1',appport]]}))
   boot=app/'_boot.py';boot.write_text("import sys,runpy\nfrom pathlib import Path\np=Path(__file__).resolve().parent\nsys.path.insert(0,str(p))\nfrom _test_safety import install_guard\ninstall_guard(p/'_isolation.json')\nrunpy.run_path(str(p/'app.py'),run_name='__main__')\n")
   env={k:v for k,v in os.environ.items() if not k.startswith(('BAIDU_','BUBBLE_WEB_','DEEPSEEK_','OLLAMA_'))};env.update(BUBBLE_WEB_ENABLED='false',DEEPSEEK_ENABLED='false',MODEL_PROVIDER='ollama',OLLAMA_HOST=f'http://127.0.0.1:{dep.server_port}')

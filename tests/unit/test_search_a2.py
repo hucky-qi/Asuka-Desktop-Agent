@@ -4,7 +4,7 @@ from array import array
 from types import SimpleNamespace as NS
 from unittest.mock import patch
 import settings,app,file_tools,search_intent,semantic_search,identifier_intent
-import test_accuracy_constraints as fixtures
+from tests.unit import test_accuracy_constraints as fixtures
 
 class A2Tests(unittest.TestCase):
  setUp=fixtures.HardConstraintTests.setUp

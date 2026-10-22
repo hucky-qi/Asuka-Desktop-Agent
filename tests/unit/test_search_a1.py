@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 from array import array
-import test_accuracy_constraints as fixtures
+from tests.unit import test_accuracy_constraints as fixtures
 import app,search_intent,semantic_search,settings
 
 class A1Tests(unittest.TestCase):

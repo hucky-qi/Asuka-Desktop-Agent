@@ -5,7 +5,7 @@ from array import array
 from types import SimpleNamespace as NS
 from unittest.mock import patch
 import app,settings,search_retrieval,semantic_search,retrieval_cache,concept_review,file_tools,diagnostics
-import test_accuracy_constraints as fixtures
+from tests.unit import test_accuracy_constraints as fixtures
 
 class BalanceTests(unittest.TestCase):
  setUp=fixtures.HardConstraintTests.setUp

@@ -13,7 +13,7 @@ import file_tools
 import semantic_search
 import settings
 import start
-from test_app import LocalAssistantTests
+from tests.unit.test_app import LocalAssistantTests
 
 
 class UpgradeTests(unittest.TestCase):

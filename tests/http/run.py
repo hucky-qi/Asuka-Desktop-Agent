@@ -9,7 +9,7 @@ from urllib.error import HTTPError
 from concurrent.futures import ThreadPoolExecutor
 import argparse,datetime,hashlib,json,os,shutil,socket,subprocess,sys,threading,time,uuid,base64
 P=Path(__file__).resolve().parents[2];R=Path(__file__).resolve().parent
-sys.path.insert(0,str(P/'acceptance/test-safety'))
+sys.path.insert(0,str(P/'tests/safety'))
 from safety import launch
 
 def request(base,path,body=None,timeout=150):
@@ -293,7 +293,8 @@ def port():
 def prepare(runroot,appport,depport):
  app=runroot/'app';app.mkdir(parents=True);fixtures=app/'fixtures';fixtures.mkdir()
  for f in P.glob('*.py'):shutil.copy2(f,app/f.name)
- for f in ['bubble.html','input-guard.js']:shutil.copy2(P/f,app/f)
+ shutil.copytree(P/'frontend',app/'frontend')
+ shutil.copytree(P/'macos',app/'macos',ignore=shutil.ignore_patterns('__pycache__','*.app'))
  # Isolated deployment configuration only; no algorithm or internal state mutation.
  with (app/'settings.py').open('a') as f:f.write(f'\n# Black-box isolated deployment configuration\nPORT={appport}\nWORKSPACE=PROJECT/"fixtures"\nSEARCH_ROOTS={{"workspace":WORKSPACE,"desktop":WORKSPACE/"desktop"}}\nSEMANTIC_DB=PROJECT/".semantic_index.sqlite3"\n')
  for name,text in {'野餐清单.txt':'野餐需要水、苹果和餐垫。','ZX8427野餐清单.txt':'项目ZX8427户外用品。','ZX8428野餐清单.txt':'另一个项目编号。','无关账单.txt':'五月电费账单。'}.items():(fixtures/name).write_text(text)

@@ -24,14 +24,14 @@ def main():
         raise SystemExit("桌面悬浮宠物需要 macOS")
     if not shutil.which("swiftc"):
         raise SystemExit("未找到 swiftc。请先安装 Xcode Command Line Tools")
-    lock = Path(__file__).with_name(".desktop-pet.lock").open("a")
+    lock = (settings.PROJECT / ".desktop-pet.lock").open("a")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         print("当前项目悬浮助手已运行，未重复启动。若现有窗口使用旧模型，请先右键退出角色，再运行本启动项；启动项不会静默替换正在使用的窗口。")
         return
-    source = Path(__file__).with_name("desktop_pet.swift")
-    binary = Path(__file__).with_name(".desktop_pet")
+    source = (settings.MACOS / "desktop_pet.swift")
+    binary = (settings.PROJECT / ".desktop_pet")
     if not binary.exists() or binary.stat().st_mtime_ns < source.stat().st_mtime_ns:
         compile_helper(source, binary)
     address = f"http://{settings.HOST}:{settings.PORT}"
@@ -47,9 +47,9 @@ def main():
             model_address = model_address.rstrip('/')
             with urllib.request.urlopen(model_address+'/health', timeout=2) as response:
                 health = json.load(response)
-            expected = str(Path(__file__).resolve().parent/'live2d/.runtime')
+            expected = str(settings.PROJECT/'live2d/.runtime')
             actual = Path(health.get('root','')).resolve()
-            preview_root = Path(__file__).resolve().parent/'live2d/.previews'
+            preview_root = settings.PROJECT/'live2d/.previews'
             if health.get('service') != 'local-file-chat-live2d-static' or not (str(actual)==expected or (args.live2d_url and actual.is_relative_to(preview_root))):
                 raise ValueError('显示端口属于其他程序')
             command.append(model_address+'/?pet=1')
