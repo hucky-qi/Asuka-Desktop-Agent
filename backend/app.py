@@ -874,6 +874,8 @@ class Handler(BaseHTTPRequestHandler):
             raise file_tools.SearchCancelled()
 
     def do_POST(self):
+        import backend.native_context as native_context
+        self.received_clock = native_context.system_clock()
         if self.path in ('/api/bubble/speech','/api/assistant/speech'):
             if self.headers.get('Host')!=f'{settings.HOST}:{settings.PORT}' or self.headers.get('Origin')!=f'http://{settings.HOST}:{settings.PORT}':self.send_json(403,{'error':'语音仅允许本机同源页面主动操作。'});return
             try:

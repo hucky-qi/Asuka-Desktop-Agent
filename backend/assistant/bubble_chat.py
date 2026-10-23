@@ -110,7 +110,8 @@ def stop(session_id, request_id=None, reset=False):
                 SessionContext(c).clear_dialogue();c.file_context=None;c.task_view=None;c.last_domain="chat";c.submitted=False;c.calendar_context=None;c.calendar_references=[]
         return sid
 
-def prepare(body):
+def prepare(body, received_clock=None):
+    received_clock=received_clock or __import__('backend.native_context',fromlist=['*']).system_clock()
     text=body.get('question');rid=body.get('request_id')
     if not isinstance(text,str) or not text.strip():raise ValueError('请先输入问题。')
     if len(text.strip())>1000:raise ValueError('这条消息较长，请缩短或分段发送；内容尚未发送，当前任务保留。')
@@ -139,7 +140,7 @@ def prepare(body):
         c.task_token=task_status.begin(rid,"bubble")
         c.epoch+=1;c.request=rid;c.active_domain=None;c.cancel=threading.Event();c.touched=session_now();c.submitted=True
         if edit_id is not None and c.calendar_snapshot:c.calendar_snapshot['epoch']=c.epoch
-        return sid,c,c.epoch,rid,c.cancel,text.strip(),list(c.history),body.get('web_enabled') is True,c.task_token,{"scope":body.get("scope","all"),"snapshot_id":body.get("file_snapshot_id"),"qa_continue":body.get("qa_continue"),"web_new_search":body.get("web_new_search") is True}
+        return sid,c,c.epoch,rid,c.cancel,text.strip(),list(c.history),body.get('web_enabled') is True,c.task_token,{"received_clock":dict(received_clock),"scope":body.get("scope","all"),"snapshot_id":body.get("file_snapshot_id"),"qa_continue":body.get("qa_continue"),"web_new_search":body.get("web_new_search") is True}
 
 def generate(job, emit, provider=None, calendar_intent=None):
     import backend.providers.model_dispatch as model_dispatch
@@ -163,6 +164,7 @@ def _generate(job, emit, provider=None, calendar_intent=None):
     def current():
         with LOCK:return c.epoch==epoch and c.request==rid and not cancel.is_set()
     scope_task=Task(sid,rid,epoch,cancel,token,current)
+    scope_task.received_clock=entry_opts.get("received_clock")
     file_out=None
     stream=None;acquired=False
     timed_out=threading.Event()
@@ -207,6 +209,7 @@ def _generate(job, emit, provider=None, calendar_intent=None):
         with LOCK:previous_calendar,calendar_references,selected_edit=context.calendar_inputs()
         decision=assistant_entry.route(text,provider or PROVIDER,cancel,context.files,bool(selected_edit),(c.understanding_pending or {}).get('fields'),c.calendar_pending if __import__('backend.calendar.assistant_calendar', fromlist=['*']).enabled() else None) if direct is None else {'route':'chat'}
         route=decision['route']
+        if route=='clarify' and decision.get('resume_pending') and ((c.calendar_pending or {}).get('fields') or {}).get('stage') in ('uncommitted_create','uncommitted_carrier'):route='calendar'
         with LOCK:
             if current() and decision.get('pending_file'):c.understanding_pending={'owner':'local','fields':decision['pending_file']}
             elif current() and route=='files':c.understanding_pending=None
@@ -519,7 +522,7 @@ def handle(handler,body):
                         if c.request==selection_request:c.request=None;c.cancel=None
             return
         if question:
-            job=prepare({'session_id':sid,'request_id':body.get('request_id') or uuid.uuid4().hex,'question':question,'web_enabled':False})
+            job=prepare({'session_id':sid,'request_id':body.get('request_id') or uuid.uuid4().hex,'question':question,'web_enabled':False},offer.get('clock'))
             events=[];generate(job,events.append,calendar_intent={'kind':'calendar','operation':'create'})
             result=next((e for e in reversed(events) if e.get('type') in ('done','error')),{'error':'安排提取未完成'})
             handler.send_json(200,result);return
@@ -543,7 +546,7 @@ def handle(handler,body):
         sid=stop(body.get('session_id'),body.get('request_id'),route.endswith('/reset'))
         with LOCK:committed=bool(sid in SESSIONS and SESSIONS[sid].memory_last_commit==body.get('request_id'))
         handler.send_json(200,{'session_id':sid,'memory_committed':committed,'model':__import__('backend.providers.cloud_access', fromlist=['*']).status(SESSIONS[sid]) if sid in SESSIONS else None});return
-    job=prepare(body)
+    job=prepare(body, getattr(handler,"received_clock",None))
     handler.send_response(200);handler.send_header('Content-Type','application/x-ndjson');handler.send_header('Cache-Control','no-store');handler.end_headers()
     def emit(item):
         import json

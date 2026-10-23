@@ -5,6 +5,7 @@ import backend.calendar.calendar_reminders as service, backend.native_context as
 def handle(body,entry='bubble'):
  import backend.assistant.bubble_chat as bubble_chat
  action=body.get('action')
+ if action in ('set','adjust') and (type(body.get('minutes')) is not int or not 0<=body['minutes']<=10080):raise ValueError('请填写0至10080的整数分钟，0表示开始时提醒。')
  testing=getattr(__import__('backend.settings', fromlist=['*']),'REMINDER_NOTIFICATION_TESTING',False) is True and action in ('notification_status','notification_authorize','notification_test')
  if not service.enabled() and action not in ('configuration','configure','notification_status','notification_authorize') and not testing:raise ValueError('本机助手提醒当前未启用（开关关闭），没有设置提醒；请从聊天设置→本机日程提醒开启后返回此卡。')
  sid=body.get('session_id')

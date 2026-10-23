@@ -52,7 +52,7 @@ def normalize(content,has_files=False,pending=None,legacy=False):
   elif not legacy:return {'route':'clarify','reply':obj['reply'] or '请补充文件目标或要改变的条件。'}
   return {'route':'files','file_action':route.split('_')[1],'file_plan':plan,'reply':obj['reply']}
  if f is not None:raise ValueError('非文件任务带入了文件操作，未执行。')
- return {'route':route,'reply':obj['reply'],**({'journal':obj.get('journal')} if route=='journal' else {})}
+ return {'route':route,'reply':obj['reply'],**({'resume_pending':True} if obj.get('resume_pending') else {}),**({'journal':obj.get('journal')} if route=='journal' else {})}
 
 # Compact wire documentation, never a replacement for the complete local JSON schema.
 WIRE_CONTRACT={'additionalProperties':False,

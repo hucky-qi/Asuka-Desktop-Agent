@@ -4,7 +4,7 @@ window.PersonaView={
  set(info){document.documentElement.dataset.personaEnabled=info?.enabled===false?'false':'true';document.documentElement.dataset.personaTone=info?.tone||'default';if(!this.enabled())document.querySelectorAll('.persona-intro').forEach(e=>e.remove())},
  text(state,original=''){
   if(!this.enabled()||document.documentElement.dataset.personaTone==='serious')return original;
-  const phrases={files_ready:'结果摆好了，先看卡片。',files_partial:'先看覆盖范围，别急着把部分结果当成全部。',files_empty:'这次没有可靠匹配；已查范围外仍不能下结论。',calendar_preview:'先核对预览，确认后才执行。',calendar_delete:'请确认具体删除对象与范围。',verified:'结果已读回核对。',unknown:'先核对最终状态，不要重复执行。',failed:'这次尚未完成，先看具体原因。',candidate:'目前只是候选，尚未生效。',reminder:'该准备了。',saved:'结果已保存。'};
+  const phrases={files_ready:'结果摆好了，先看卡片。',files_partial:'先看覆盖范围，别急着把部分结果当成全部。',files_empty:'这次没有可靠匹配；已查范围外仍不能下结论。',calendar_preview:'时间和事项理顺了。先检查，确认后才保存。',calendar_delete:'请确认具体删除对象与范围。',verified:'结果已读回核对。',unknown:'先核对最终状态，不要重复执行。',failed:'这次尚未完成，先看具体原因。',candidate:'目前只是候选，尚未生效。',reminder:'该准备了。',saved:'结果已保存。'};
   return (phrases[state]||'')+(original?' '+original:'');
  },
  welcome(parent){

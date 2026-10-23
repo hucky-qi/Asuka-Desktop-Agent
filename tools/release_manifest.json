@@ -661,6 +661,30 @@
     {
       "path": "tools/verify_release.py",
       "origin": "source"
+    },
+    {
+      "path": "tests/http/relative_time.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/relative-expectations.json",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/create_reminder.py",
+      "origin": "source"
+    },
+    {
+      "path": "docs/images/calendar-preview-example.png",
+      "origin": "source"
+    },
+    {
+      "path": "docs/images/calendar-created-example.png",
+      "origin": "source"
+    },
+    {
+      "path": "docs/images/calendar-web-preview-example.png",
+      "origin": "source"
     }
   ]
 }

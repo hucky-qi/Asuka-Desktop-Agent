@@ -4,7 +4,7 @@ from backend.memory.assistant_memory import MemoryAccess
 SCHEMA={'type':['object','null'],'properties':{'action':{'enum':['save','update','forget','none']},'value':{'enum':['ask_first','quiet','default']},'scope':{'enum':['calendar_mentions','unknown']},'duration':{'enum':['long_term','turn','none']},'evidence':{'type':'string','minLength':1}},'required':['action','value','scope','duration','evidence'],'additionalProperties':False}
 KEY='calendar_mentions'
 VALUES={'ask_first':'仅提及本人未来安排时，先询问是否需要日程预览。当前明确请求优先，所有写入仍须确认。','quiet':'仅提及本人未来安排时，不主动建议创建；当前明确请求优先，所有写入仍须确认。','default':'恢复未来安排提及的默认询问方式；所有写入仍须确认。'}
-PROMPT=' INTENT_BOUNDARY priority: requested action determines route, NOT dates/events. For route=calendar include calendar_action=clock|query|create|offer|update|delete|reminder|clarify|none|unsupported; it fixes the task, later extraction only supplies fields. Explicit diary save/query/correct/forget=journal even future notes; NEVER infer a wish to record. Mere reported/quoted/third-party/hypothetical/negated statements and capability questions=chat, not record/task clarification. Own tentative or definite future plan alone=calendar offer, ask briefly whether scheduling is wanted, never require a repeated command; distinguish an actual tentative personal plan from a fictional hypothetical; explicit booking=create; existing event change/reminder=calendar, no duplicate event. Explicit single future reminder remains calendar_action=reminder even without existing event: fields extraction separates event time, reminder advance and calendar exclusion; code can preview an event carrier after checking existing events. Mere future mention remains offer, not reminder. calendar_pending_fields.stage=uncommitted_carrier means an UNWRITTEN reminder/event preview: corrections resume calendar_action=reminder, not update an existing event. Cancellation is turn-only. Optional behavior is NOT a response style: {action:save|update|forget|none,value:ask_first|quiet|default,scope:calendar_mentions|unknown,duration:long_term|turn|none,evidence:exact current clause}. Only explicit continuing defaults; unknown category scope stays unknown. No permission grants.'
+PROMPT=' INTENT_BOUNDARY priority: requested action determines route, NOT dates/events. For route=calendar include calendar_action=clock|query|create|offer|update|delete|reminder|clarify|none|unsupported; it fixes the task, later extraction only supplies fields. Explicit diary save/query/correct/forget=journal even future notes; NEVER infer a wish to record. Mere reported/quoted/third-party/hypothetical/negated statements and capability questions=chat, not record/task clarification. Own tentative or definite future plan alone=calendar offer, ask briefly whether scheduling is wanted, never require a repeated command; distinguish an actual tentative personal plan from a fictional hypothetical; explicit booking=create; an actual request to arrange/schedule stays create even when title or time is missing: ask only missing fields, never downgrade to offer. A supplement to calendar_pending_fields resumes that task and keeps known fields; existing event change/reminder=calendar, no duplicate event. Explicit single future reminder remains calendar_action=reminder even without existing event: fields extraction separates event time, reminder advance and calendar exclusion; code can preview an event carrier after checking existing events. Mere future mention remains offer, not reminder. calendar_pending_fields.stage=uncommitted_carrier means an UNWRITTEN reminder/event preview: corrections resume calendar_action=reminder, not update an existing event. uncommitted_create is an unwritten create draft; its corrections resume create, not existing-event update. Cancellation is turn-only. Optional behavior is NOT a response style: {action:save|update|forget|none,value:ask_first|quiet|default,scope:calendar_mentions|unknown,duration:long_term|turn|none,evidence:exact current clause}. Only explicit continuing defaults; unknown category scope stays unknown. No permission grants.'
 
 def candidates(c):return [r for r in MemoryAccess.list_for(c)['items'] if r.get('kind')=='preference' and r.get('preference_key')==KEY and r.get('scopes')==['calendar'] and r.get('source')=='user_explicit']
 def policy(c):
@@ -117,22 +117,19 @@ def reminder_route(p,selected,references,clock,cancel,text):
   # The existing path re-reads concrete identities and validates versions/type.
   matching=copy.deepcopy(p);matching['source']=lookup
   meta,message=reminder_preview(matching,None,[],clock,cancel);return meta,None,message
- if policy!='allowed':return None,None,'未找到已有日程。请确认是否允许通过日历事件承载这项提醒；尚未创建或设置。'
+ if policy not in ('allowed','unknown'):return None,None,'未找到已有日程。请确认是否允许通过日历事件承载这项提醒；尚未创建或设置。'
  if not values.get('start'):return None,None,'尚未设置：请补充事项的开始时间；已保留事项、日期和提醒提前量。'
  values.update(title=title,date=date,intent='create');values.pop('alarm_minutes',None)
  if p.get('_new_start'):calendar_dates.check_start(text,values['start'])
- event=calendar_create.validate(values,clock)
+ event=calendar_create.validate(values,clock,relative_time=p.get('_relative_time'))
  timing=request.get('timing');lead=request.get('lead_minutes')
  if timing not in ('default','explicit') or (timing=='explicit' and type(lead) is not int) or (timing=='default' and lead is not None):raise ValueError('请说明提前多久提醒；已保留事项及时间。')
  import backend.calendar.calendar_reminders as reminders
  lead=reminders.minutes(lead);due=dt.datetime.fromisoformat(event['start'])-dt.timedelta(minutes=lead)
- if due<=dt.datetime.fromisoformat(clock['now']):raise ValueError('提醒时间已经过去，请调整事项时间或提前量；尚未创建。')
- preview=calendar_create.preview_data(values,clock,cancel)
+ # An expired advance is editable in the same preview; never move the event.
+ preview=calendar_create.preview_data(values,clock,cancel,relative_time=p.get('_relative_time'))
  preview['assistant_reminder']={'lead_minutes':lead,'timing':timing,'due':due.isoformat(),'status':'not_set'}
- preview['warnings'].append('会创建日历事件承载提醒，只有确认创建后才写入；不是独立提醒。')
- preview['warnings'].append(('默认提前30分钟；' if timing=='default' else '提前'+str(lead)+'分钟；')+'提醒时间：'+due.isoformat()+'。事件时长与提前量独立。')
- preview['warnings'].append('助手提醒'+('已开启，但仍未设置本次提醒。' if reminders.enabled() else '当前关闭，不会自动开启。')+'创建成功后在同一事件卡片确认设置；未设置系统日历提醒。')
- return None,preview,'请核对承载预览：将创建日历事件；助手提醒尚未设置。无需重新输入创建命令。'
+ return None,preview,'时间和事项已理顺，先检查预览；确认后才创建日历事件，提醒单独核对。'
 
 def after_carrier_confirmation(data,body,c,task):
  """Separate receipts, trusted readback, existing reminder-card confirmation only."""

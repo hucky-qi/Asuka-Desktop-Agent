@@ -27,13 +27,14 @@ def allowed(e):
     if e.get('recurring'):raise ValueError('本轮不支持修改重复日程')
     if e.get('has_attendees'):raise ValueError('该会议含与会者，可能发送更新，本轮不支持修改')
 
-def propose(original,changes,clock):
+def propose(original,changes,clock,relative_time=None):
     allowed(original)
     if not isinstance(changes,dict):raise ValueError('请明确要修改的字段')
     changes={k:v for k,v in changes.items() if v is not None}
     if not changes or set(changes)-{'title','date','start','end','end_date','duration_minutes','shift_minutes','all_day'}:raise ValueError('本轮仅支持修改标题、日期、时间或时长')
     if original.get('all_day') or 'all_day' in changes:raise ValueError('本轮不支持修改全天事件或全天/普通事件转换，请在系统日历操作')
     zone=ZoneInfo(clock['timezone']);a=dt.datetime.fromisoformat(original['start']).astimezone(zone);b=dt.datetime.fromisoformat(original['end']).astimezone(zone);seconds=(b.astimezone(dt.timezone.utc)-a.astimezone(dt.timezone.utc)).total_seconds()
+    import backend.calendar.calendar_dates as calendar_dates
     newa,newb=a,b;note='仅修改明确提出的字段；地点、备注、已有提醒保持不变。'
     for k in ('duration_minutes','shift_minutes'):
         if k in changes and (type(changes[k]) is not int or abs(changes[k])>527040):raise ValueError('时长或偏移需要明确的分钟数')
@@ -42,7 +43,7 @@ def propose(original,changes,clock):
         newa=(a.astimezone(dt.timezone.utc)+dt.timedelta(minutes=changes['shift_minutes'])).astimezone(zone);newb=(b.astimezone(dt.timezone.utc)+dt.timedelta(minutes=changes['shift_minutes'])).astimezone(zone);note+=' 按明确偏移平移，保留原时长。'
     else:
         day=date(changes['date'],clock) if 'date' in changes else a.date()
-        if 'date' in changes or 'start' in changes:newa=create.local_time(day,changes.get('start',a.strftime('%H:%M')),zone)
+        if 'date' in changes or 'start' in changes:newa=calendar_dates.relative_target(relative_time) if relative_time else create.local_time(day,changes.get('start',a.strftime('%H:%M')),zone)
         duration=changes.get('duration_minutes')
         if duration is not None and duration<=0:raise ValueError('时长必须大于零')
         if 'end' in changes or 'end_date' in changes:
@@ -53,7 +54,7 @@ def propose(original,changes,clock):
             newb=(newa.astimezone(dt.timezone.utc)+dt.timedelta(seconds=duration*60 if duration is not None else seconds)).astimezone(zone)
             if duration is None:note+=' 只改开始时间/日期，保留原时长'+str(round(seconds/60,2))+'分钟。'
     # Absolute/relative calculations may land on a repeated wall time: require a new unambiguous choice.
-    create.local_time(newa.date(),newa.strftime('%H:%M'),zone);create.local_time(newb.date(),newb.strftime('%H:%M'),zone)
+    if not relative_time:create.local_time(newa.date(),newa.strftime('%H:%M'),zone);create.local_time(newb.date(),newb.strftime('%H:%M'),zone)
     if newb<=newa:raise ValueError('结束必须晚于开始；跨午夜请明确次日结束')
     if newa<=dt.datetime.fromisoformat(clock['now']):raise ValueError('目标开始时间已过去，不会自动改到明天')
     title=changes.get('title',original['title'])
@@ -71,10 +72,10 @@ def inspect(eid,event,cancel):
 
 def make_preview(eid,data,clock,cancel):
     # Identity lookup first, then inspect proposed interval against a fresh store.
-    row=inspect(eid,{},cancel);original=row['event'];proposed,note=propose(original,data['changes'],clock)
+    row=inspect(eid,{},cancel);original=row['event'];proposed,note=propose(original,data['changes'],clock,data.get('_relative_time'))
     row=inspect(eid,proposed,cancel)
     if row['event']['version']!=original['version']:raise ValueError('原事件在读取期间变化，请重新提交')
-    return {'id':uuid.uuid4().hex,'state':'pending','original':original,'proposed':proposed,'note':note,'changes_intent':data['changes'],'conflicts':row['conflicts'],'conflict_version':row['conflict_version'],'timezone':clock['timezone']}
+    return {'id':uuid.uuid4().hex,'state':'pending','original':original,'proposed':proposed,'note':note,'changes_intent':data['changes'],**({'relative_time':data['_relative_time']} if data.get('_relative_time') else {}),'conflicts':row['conflicts'],'conflict_version':row['conflict_version'],'timezone':clock['timezone']}
 
 def preview(text,provider,cancel,references):
     data,clock=extract(text,provider,cancel)
@@ -124,7 +125,7 @@ def choose_card(snapshot,event_id,cancel,card_token=None):
     if any(event.get(k)!=latest.get(k) for k in keys):raise ValueError('日程在查询后已变化，请重新查询并选择最新事件；尚未修改')
     return {'id':uuid.uuid4().hex,'event_id':event_id,'original':latest,'changes':{}}
 
-def selected_preview(text,provider,cancel,edit,values=None):
+def selected_preview(text,provider,cancel,edit,values=None,relative_time=None):
     # Only the entry/extraction changes. Existing proposal, conflicts and journal are reused.
     import backend.calendar.calendar_dates as calendar_dates
     clock=native_context.system_clock();edit=copy.deepcopy(edit)
@@ -176,7 +177,7 @@ def selected_preview(text,provider,cancel,edit,values=None):
     if unresolved:return None,edit,' '.join(clarifications) or '请补充尚未明确的日期或时刻；已保留其他字段，尚未修改。'
     if not set(edit['changes'])&{'start','end','duration_minutes','shift_minutes','title'}:
         return None,edit,'请补充目标开始时间，例如晚上八点；已保留所选日程及已明确的日期，尚未修改。'
-    fresh=make_preview(edit['event_id'],{'changes':edit['changes']},clock,cancel)
+    fresh=make_preview(edit['event_id'],{'changes':edit['changes'],'_relative_time':relative_time},clock,cancel)
     if fresh['original']['event_id']!=edit['event_id'] or fresh['original']['calendar_id']!=edit['original']['calendar_id']:raise ValueError('预览身份与所选事件不一致，已阻止操作')
     if fresh['original']['version']!=edit['original']['version']:raise ValueError('日程在生成预览期间变化，请重新选择；尚未修改')
     return fresh,edit,None
@@ -196,7 +197,7 @@ def load(pid,sid):
 def public(p):
     def shown(e):return {k:e[k] for k in ('event_id','title','start','end','all_day','calendar_id','calendar_title','timezone','advisory','overlap_start','overlap_end') if k in e}
     if 'candidates' in p:return {'id':p['id'],'candidates':[shown(e) for e in p['candidates']]}
-    return {**{k:p[k] for k in ('id','note','timezone')},'original':shown(p['original']),'proposed':shown(p['proposed']),'conflicts':[shown(e) for e in p['conflicts']]}
+    return {**{k:p[k] for k in ('id','note','timezone')},'original':shown(p['original']),'proposed':shown(p['proposed']),'conflicts':[shown(e) for e in p['conflicts']],**({'relative_time':p['relative_time']} if p.get('relative_time') else {})}
 def publish(p,sid,epoch):
     with LOCK:p.update(session_id=sid,epoch=epoch);save(p);return public(p)
 def invalidate(sid):
@@ -233,6 +234,7 @@ def action(body,c,sid,cancel=False):
         if p['state'] not in ('pending','uncertain','writing'):raise ValueError('修改预览已失效')
         if body.get('confirm') is not True:raise ValueError('必须明确确认后才修改')
         if p['conflicts'] and body.get('accept_conflicts') is not True:return {'status':'conflict_confirmation_required','message':'请确认已查看冲突，选择仍然修改或重新调整'}
+        if p['state']=='pending' and dt.datetime.fromisoformat(p['proposed']['start'])<=dt.datetime.fromisoformat(native_context.system_clock()['now']):raise ValueError('目标开始时间已过去，请明确新的时间；没有自动顺延。')
         reconcile=p['state'] in ('uncertain','writing');p['state']='writing' if reconcile else 'checking';save(p);INFLIGHT.add(p['id'])
     try:
         if not reconcile:
@@ -246,14 +248,14 @@ def action(body,c,sid,cancel=False):
                     # Reservation is durable before native I/O, outside this lock.
                     p['state']='writing';save(p)
             if changed:
-                new=make_preview(p['original']['event_id'],{'changes':p['changes_intent']},native_context.system_clock(),threading.Event())
+                new=make_preview(p['original']['event_id'],{'changes':p['changes_intent'],'_relative_time':p.get('relative_time')},native_context.system_clock(),threading.Event())
                 with LOCK:
                     if c.epoch!=p['epoch']:raise ValueError('预览已失效')
                     return {'status':'needs_confirmation','message':'原事件或冲突发生变化，请重新核对并确认','calendar_update_preview':publish(new,sid,c.epoch)}
         changes={k:p['proposed'][k] for k in ('title','start','end') if p['proposed'][k]!=p['original'][k]}
         result=bridge({'action':'update_reconcile' if reconcile else 'update','operation_id':p['id'],'event_id':p['original']['event_id'],'event':p['proposed'],'changes':changes,'expected_version':p['original']['version'],'expected_conflict_version':p['conflict_version']},threading.Event())
         if result.get('status')=='stale':
-            new=make_preview(p['original']['event_id'],{'changes':p['changes_intent']},native_context.system_clock(),threading.Event())
+            new=make_preview(p['original']['event_id'],{'changes':p['changes_intent'],'_relative_time':p.get('relative_time')},native_context.system_clock(),threading.Event())
             with LOCK:
                 if c.epoch!=p['epoch']:raise ValueError('预览已失效')
                 p['state']='cancelled';save(p)

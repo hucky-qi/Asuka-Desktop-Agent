@@ -1,0 +1,124 @@
+{
+  "basis": "2033-01-01T23:50:17+11:00",
+  "timezone": "Australia/Sydney",
+  "dev": [
+    {
+      "q": "半小时后帮我安排合成整理",
+      "expression": "半小时后",
+      "seconds": 1800
+    },
+    {
+      "q": "30分钟后安排合成复核",
+      "expression": "30分钟后",
+      "seconds": 1800
+    },
+    {
+      "q": "30min之后请提醒我整理合成资料，提前10分钟",
+      "expression": "30min之后",
+      "seconds": 1800,
+      "reminder": 10
+    },
+    {
+      "q": "一个半小时后安排合成练习",
+      "expression": "一个半小时后",
+      "seconds": 5400
+    },
+    {
+      "q": "过两小时安排合成讨论",
+      "expression": "过两小时",
+      "seconds": 7200
+    },
+    {
+      "q": "in 45 minutes, schedule a synthetic review",
+      "expression": "in 45 minutes",
+      "seconds": 2700
+    },
+    {
+      "q": "一小时二十分钟后安排合成复盘，持续45分钟",
+      "expression": "一小时二十分钟后",
+      "seconds": 4800,
+      "duration": 45
+    },
+    {
+      "q": "半小时前安排合成整理",
+      "expression": "半小时前",
+      "seconds": -1800,
+      "reject": true
+    },
+    {
+      "q": "晚点提醒我整理合成材料",
+      "reject": true
+    },
+    {
+      "q": "不要在30分钟后创建安排",
+      "route": "chat",
+      "reject": true
+    },
+    {
+      "q": "翻译“30分钟后出门”",
+      "route": "chat",
+      "reject": true
+    },
+    {
+      "q": "假如两小时后出门，应该怎么准备",
+      "route": "chat",
+      "reject": true
+    },
+    {
+      "q": "安排合成复盘，持续30分钟",
+      "reject": true
+    },
+    {
+      "q": "提前30分钟提醒我",
+      "reject": true
+    },
+    {
+      "q": "半小时后或者两小时后安排合成讨论",
+      "reject": true,
+      "unknown": true
+    }
+  ],
+  "holdout": [
+    {
+      "q": "再过90min，安排一次合成检查",
+      "expression": "再过90min",
+      "seconds": 5400
+    },
+    {
+      "q": "请在1.5小时之后安排合成评审",
+      "expression": "1.5小时之后",
+      "seconds": 5400
+    },
+    {
+      "q": "安排合成练习，时间放在two hours from now",
+      "expression": "two hours from now",
+      "seconds": 7200
+    },
+    {
+      "q": "过一个小时再安排合成整理，提前五分钟提醒",
+      "expression": "过一个小时",
+      "seconds": 3600,
+      "reminder": 5
+    }
+  ],
+  "journeys": [
+    "missing subject -> supplement retains target",
+    "explicit new relative correction uses new receipt",
+    "lead and duration changes retain target",
+    "permission denied -> delayed recheck -> same target",
+    "permission wait -> process restart -> same target",
+    "expired confirm rejected and zero writes",
+    "duplicate confirm -> exactly one synthetic write",
+    "reset/cancel invalidate preview; forged receipt ignored",
+    "model response delayed across midnight does not rebase",
+    "old response after reset does not republish",
+    "DST absolute elapsed-time calculation",
+    "client recovery draft tampering rejected"
+  ],
+  "limits": {
+    "DeepSeek_requests": 20,
+    "estimate_cny": 0.5,
+    "other_real_services": 0,
+    "no_auto_retry": true
+  }
+}

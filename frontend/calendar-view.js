@@ -55,10 +55,11 @@ function renderCalendarEvents(meta){
   const stamp=el('div',time,'event-time',row);stamp.title=event.start+' → '+event.end+' · '+meta.timezone;
   el('div',event.title,'event-title',row);el('div',event.calendar_title||'','event-calendar',row);
   if(event.event_id){
-   const panel=el('details','','event-reminder',row);el('summary','助手提醒','',panel);const label=el('label','提前分钟：','',panel),lead=document.createElement('input');lead.type='number';lead.min='1';lead.max='10080';lead.value=String(meta.reminder_request?.lead_minutes??30);if(meta.reminder_request)panel.open=true;lead.style.width='55px';label.append(lead);
+   const panel=el('details','','event-reminder',row);el('summary','助手提醒','',panel);const label=el('label','提前分钟：','',panel),lead=document.createElement('input');lead.type='number';lead.min='0';lead.max='10080';lead.value=String(meta.reminder_request?.lead_minutes??30);if(meta.reminder_request)panel.open=true;lead.style.width='55px';label.append(lead);
    const set=el('button',meta.reminder_request?'确认设置助手提醒':'设置本机提醒','',panel);set.type='button';const note=el('p','默认30分钟，只设置本机助手提醒，不改变日历。需先在设置中启用。','event-calendar',panel);let op=null;
    if(meta.reminder_request){const q=meta.reminder_request;note.textContent=(q.enabled?'':'当前关闭；可从齿轮→本机日程提醒启用后返回。')+(q.timing==='default'?'默认':'')+'提前'+q.lead_minutes+'分钟；'+(q.due?'提醒时间：'+new Date(q.due).toLocaleString('zh-CN',{timeZone:meta.timezone})+'。':'请先选定具体事件。')+'仅设置助手提醒，不添加系统日历提醒；尚未保存。'}
    set.onclick=async()=>{if(host.active||!box.isConnected||host.epoch!==version)return;set.disabled=true;try{
+    if(!/^(0|[1-9][0-9]*)$/.test(lead.value)||Number(lead.value)>10080)throw Error('请填写0至10080的整数分钟。');
     const selected=await host.post('/api/bubble/reminders',{session_id:host.sid,action:'select',snapshot_id:meta.snapshot_id,card_token:event.card_token});
     if(!box.isConnected||host.epoch!==version)return;
     op=op||crypto.randomUUID().replaceAll('-','');const r=await host.post('/api/bubble/reminders',{session_id:host.sid,action:'set',selection_token:selected.selection_token,minutes:Number(lead.value),operation_id:op});
@@ -169,18 +170,29 @@ function renderCreated(r,p){
  line(role?variants[index]:'日程创建成功。');
  line(e.title);line(dates);
  for(const w of p.warnings||[])line(w);
- line('助手提醒：尚未设置；创建日程不代表提醒已开启。');
+ const rem=r.assistant_reminder;line(rem?.status==='saved'?'助手提醒：已保存，'+new Date(rem.due).toLocaleString('zh-CN',{timeZone:e.timezone}):rem?.message||'助手提醒：本次未设置。');
  const details=document.createElement('details'),summary=document.createElement('summary'),receipt=document.createElement('pre');summary.textContent='日程详情';receipt.style.whiteSpace='pre-wrap';receipt.textContent='时区：'+e.timezone+'\n开始：'+e.start+'\n结束：'+e.end+'\n事件身份：'+r.event_id+'\n读回核对：成功'+(r.message?'\n'+r.message:'');details.append(summary,receipt);box.append(details);host.answer.prepend(box);
 }
-function renderCalendarPreview(p){
+function renderCalendarPreview(p,draft=null){
  host.answer.replaceChildren();const box=document.createElement('div');const previewEpoch=host.epoch;const stillCurrent=()=>box.isConnected&&host.epoch===previewEpoch;box.className='calendar-preview';box.dataset.previewId=p.id;window.PersonaView?.intro(box,'calendar_preview');
  const line=text=>{const e=document.createElement('p');e.textContent=text;box.appendChild(e)};
- line('待确认 · '+p.title);line(p.date_label);line(p.all_day?'全天（结束日期不含当天）':p.start.slice(11,16)+' → '+p.end.slice(11,16));line('本机时区：'+p.timezone);line(p.assistant_reminder?'将创建日历事件；助手提醒尚未设置，创建后可在同一事件卡片继续。':'系统日历提醒：未设置');line('事件链接将保存本机防重复标记。');
+ line(p.title);
+ const fmt=new Intl.DateTimeFormat('zh-CN',{timeZone:p.timezone,year:'numeric',month:'long',day:'numeric'}),tm=new Intl.DateTimeFormat('zh-CN',{timeZone:p.timezone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}),start=new Date(p.start),end=new Date(p.end);
+ line(p.all_day?fmt.format(start)+'（全天）':fmt.format(start)+' '+tm.format(start)+'–'+(fmt.format(start)===fmt.format(end)?'':fmt.format(end)+' ')+tm.format(end));
  for(const w of p.warnings||[])line(w);
- const select=document.createElement('select');select.setAttribute('aria-label','目标日历');for(const c of p.calendars){const o=new Option(c.title,c.id);o.selected=c.id===p.calendar_id;select.add(o)}box.appendChild(select);
+ const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='日程详情';details.append(summary);box.append(details);
+ const detail=t=>{const e=document.createElement('p');e.textContent=t;details.append(e)};
+ detail('时区：'+p.timezone);detail('开始：'+p.start+'；结束：'+p.end);detail(p.assistant_reminder?'会创建日历事件承载这项助手提醒；日历与提醒分别保存。':'仅创建日历事件，不设置系统日历闹钟。');detail('事件链接保存本机防重复标记。修改时间或标题后需重新确认。');
+ const select=document.createElement('select');select.setAttribute('aria-label','目标日历');for(const c of p.calendars){const o=new Option(c.title,c.id);o.selected=c.id===p.calendar_id;select.add(o)}details.appendChild(select);
+ const option=p.reminder_options||{},remLabel=document.createElement('label'),remCheck=document.createElement('input'),lead=document.createElement('input');remCheck.type='checkbox';remCheck.checked=draft?draft.enabled:option.selected===true;remCheck.id='create-reminder';remLabel.append(remCheck,document.createTextNode('同时提醒我'));box.append(remLabel);
+ lead.type='text';lead.inputMode='numeric';lead.pattern='[0-9]+';lead.setAttribute('aria-label','提前分钟');lead.value=draft?draft.minutes:(option.minutes==null?'30':String(option.minutes));lead.style.width='56px';box.append(lead,document.createTextNode(' 分钟前（0＝开始时）'));
+ const feedback=document.createElement('p');feedback.setAttribute('role','status');box.append(feedback);const enable=document.createElement('button');enable.type='button';enable.textContent='打开提醒设置';enable.hidden=true;box.append(enable);enable.onclick=()=>document.querySelector('#settings,#assistantModel')?.click();
+ const offset=Date.parse(option.server_now||new Date().toISOString())-Date.now();
+ const reminderError=()=>{if(!remCheck.checked)return '';if(p.all_day)return '全天事件暂不支持助手提醒。';if(!/^(0|[1-9][0-9]*)$/.test(lead.value)||Number(lead.value)>10080)return '请填写0至10080的整数分钟，不能留空、小数或指数。';const remain=(start.getTime()-(Date.now()+offset))/60000;if(remain<=0||Number(lead.value)>remain)return '这个提前量已不适用，请选更短时间；日程时间不会改变。';return ''};
+ let expiryTimer;const updateRange=()=>{if(!box.isConnected){clearInterval(expiryTimer);return}lead.disabled=!remCheck.checked;const error=reminderError(),max=Math.max(0,Math.min(10080,Math.floor((start.getTime()-(Date.now()+offset))/60000)));enable.hidden=!remCheck.checked||option.enabled===true;feedback.textContent=error||(remCheck.checked?(option.enabled?'':'助手提醒关闭，需在设置开启；不会自动开启。')+'当前最多提前'+max+'分钟；默认30分钟，可修改。':'');yes.disabled=!!host.active?.calendarWrite||!p.calendars.length||!!error;};remCheck.onchange=lead.oninput=updateRange;
  const duplicate=document.createElement('input');duplicate.type='checkbox';duplicate.id='calendar-duplicate';
  if(p.duplicates?.length){line('可能重复：'+p.duplicates.map(d=>d.title+' '+d.start).join('；'));const label=document.createElement('label');label.append(duplicate,document.createTextNode('仍要创建一份新事件'));box.appendChild(label)}
- const yes=document.createElement('button'),no=document.createElement('button');yes.textContent='确认创建';yes.type=no.type='button';no.textContent='取消';yes.id='calendar-confirm';no.id='calendar-cancel';box.append(yes,no);line('修改时间/标题请重新输入，必须重新确认。');host.answer.appendChild(box);
+ const yes=document.createElement('button'),no=document.createElement('button');yes.textContent='确认创建';yes.type=no.type='button';no.textContent='取消';yes.id='calendar-confirm';no.id='calendar-cancel';box.append(yes,no);host.answer.appendChild(box);updateRange();expiryTimer=setInterval(updateRange,10000);
  if(!p.calendars.length){
   yes.disabled=select.disabled=true;const status=p.calendar_status;
   const pending=['authorization_required','authorization_pending'].includes(status),denied=['denied','revoked','restricted','write_only'].includes(status);
@@ -188,7 +200,7 @@ function renderCalendarPreview(p){
   if(denied)line(status==='restricted'?'系统限制了日历访问，请检查系统管理限制。恢复后返回这里重新检查。':'请到系统设置 → 隐私与安全性 → 日历，允许原“明日香小助手”完全访问；返回后重新检查。');
   const refresh=document.createElement('button');refresh.id='calendar-permission-recheck';refresh.textContent=pending?'继续授权':denied?'重新检查':'重试日历服务';refresh.type='button';box.appendChild(refresh);
   const retry=async()=>{if(!stillCurrent()||host.active||refresh.disabled)return;refresh.disabled=true;
-   try{const r=await host.post('/api/bubble/calendar/refresh',{session_id:host.sid,preview_id:p.id});if(stillCurrent())renderCalendarPreview(r.calendar_preview)}
+   try{const r=await host.post('/api/bubble/calendar/refresh',{session_id:host.sid,preview_id:p.id});if(stillCurrent())renderCalendarPreview(r.calendar_preview,{enabled:remCheck.checked,minutes:lead.value})}
    catch(e){if(stillCurrent())host.notice(e.message)}finally{refresh.disabled=false}};
   refresh.onclick=retry;
   // Permission changes in Settings are read fresh on return; undecided permission
@@ -196,18 +208,18 @@ function renderCalendarPreview(p){
   if(denied){const recheck=()=>{if(!box.isConnected){window.removeEventListener('focus',recheck);return}if(stillCurrent()&&!host.active)retry()};window.addEventListener('focus',recheck)}
  }
 
- select.onchange=async()=>{yes.disabled=no.disabled=select.disabled=true;try{const r=await host.post('/api/bubble/calendar/revise',{session_id:host.sid,preview_id:p.id,calendar_id:select.value});if(stillCurrent())renderCalendarPreview(r.calendar_preview)}catch(e){host.notice(e.message);yes.disabled=no.disabled=select.disabled=false}};
+ select.onchange=async()=>{yes.disabled=no.disabled=select.disabled=true;try{const r=await host.post('/api/bubble/calendar/revise',{session_id:host.sid,preview_id:p.id,calendar_id:select.value});if(stillCurrent())renderCalendarPreview(r.calendar_preview,{enabled:remCheck.checked,minutes:lead.value})}catch(e){host.notice(e.message);yes.disabled=no.disabled=select.disabled=false}};
  no.onclick=async()=>{yes.disabled=no.disabled=true;try{const r=await host.post('/api/bubble/calendar/cancel',{session_id:host.sid,preview_id:p.id});if(!stillCurrent())return;if(r.status==='cancelled')host.answer.textContent='已取消预览，没有写入日历。';else host.notice(r.message||r.status)}catch(e){host.notice(e.message)}};
  yes.onclick=async()=>{
-  if(host.active)return;const task={id:crypto.randomUUID(),generation:++host.epoch,controller:new AbortController(),calendarWrite:true};host.active=task;yes.disabled=no.disabled=select.disabled=true;host.panelEvent('begin',task);host.beginState(task.id);host.controls(true);
-  try{const r=await host.post('/api/bubble/calendar/confirm',{session_id:host.sid,preview_id:p.id,request_id:task.id,confirm:true,accept_duplicate:duplicate.checked});if(host.active!==task||host.epoch!==task.generation)return;
+  if(host.active)return;const error=reminderError();if(error){feedback.textContent=error;return}const task={id:crypto.randomUUID(),generation:++host.epoch,controller:new AbortController(),calendarWrite:true};host.active=task;yes.disabled=no.disabled=select.disabled=true;host.panelEvent('begin',task);host.beginState(task.id);host.controls(true);
+  try{const r=await host.post('/api/bubble/calendar/confirm',{session_id:host.sid,preview_id:p.id,request_id:task.id,confirm:true,accept_duplicate:duplicate.checked,assistant_reminder:{enabled:remCheck.checked,minutes:remCheck.checked?Number(lead.value):null}});if(host.active!==task||host.epoch!==task.generation)return;
    host.state('idle',task.id);
    if(r.status==='verified'){renderCreated(r,p)}
-   else if(r.calendar_preview){renderCalendarPreview(r.calendar_preview)}
+   else if(r.calendar_preview){renderCalendarPreview(r.calendar_preview,{enabled:remCheck.checked,minutes:lead.value})}
    else if(r.status==='uncertain'||r.status==='writing'){line(r.message||'结果不确定，请核对原操作');yes.textContent='核对原操作';yes.disabled=false;no.disabled=true;void 0}
    else {line(r.message||'未能创建：'+r.status);if(r.status==='duplicate_confirmation_required'){yes.disabled=no.disabled=false}}
    host.panelEvent('ready',task);
-  }catch(e){if(host.active===task&&host.epoch===task.generation){host.state('idle',task.id);host.notice(e.message);line('结果未确认；可核对原操作，不要另建相同事件。');yes.textContent='核对原操作';yes.disabled=false;host.panelEvent('error',task)}}finally{if(host.active===task){host.active=null;host.controls(false)}}
+  }catch(e){if(host.active===task&&host.epoch===task.generation){host.state('idle',task.id);host.notice(e.message);line('请保留当前预览；若请求已发出但结果不明，只核对原操作，不要另建相同事件。');yes.textContent='核对原操作';yes.disabled=false;host.panelEvent('error',task)}}finally{if(host.active===task){host.active=null;host.controls(false)}}
  };
 }
 

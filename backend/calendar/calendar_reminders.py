@@ -47,7 +47,7 @@ def moment(value):
  return d.astimezone(UTC)
 def minutes(value):
  if value is None:return 30
- if type(value) is not int or not 1<=value<=10080:raise ValueError('请明确1分钟至7天之间的提前量。')
+ if type(value) is not int or not 0<=value<=10080:raise ValueError('请明确0至10080之间的整数分钟；0表示开始时提醒。')
  return value
 @contextmanager
 def store():
@@ -90,7 +90,7 @@ def set_plan(event,lead,check=lambda:None,operation_id=None):
  if not isinstance(operation_id,str) or not __import__('re').fullmatch('[a-f0-9-]{32,36}',operation_id):raise ValueError('提醒请求身份无效，未保存。')
  lead=minutes(lead);at=now();due=moment(event['start'])-dt.timedelta(minutes=lead)
  if moment(event['start'])<=at:raise ValueError('事件已经开始或已过去，尚未设置提醒。')
- if due<=at:raise ValueError('所选提前时间已过去，请选择更短的提前量。')
+ if due<at:raise ValueError('所选提前时间已过去，请选择更短的提前量。')
  ident=key(event)
  with store() as d:
   check();
@@ -145,7 +145,7 @@ def sync():
    if r.get('paused_delivery_status'):
     r['status']=r.pop('paused_delivery_status');r['note']='事件已重新核对，保留原投递结果，不重复发送。'
    if r['status'] in ('delivered','read','system_accepted','system_visible','user_viewed'):
-    if at>=moment(r['start']):
+    if at>=moment(r['start'])+dt.timedelta(seconds=60 if r['lead_minutes']==0 else 0):
      if r.get('delivery_id') and native_enabled():__import__('backend.calendar.reminder_native', fromlist=['*']).cancel(r['delivery_id'])
      r.update(status='expired',version=r['version']+1,delivery_id=None,note='事件已开始，旧提醒展示已失效。')
     continue
@@ -153,7 +153,7 @@ def sync():
     if (at-moment(r['claim_at'])).total_seconds()>60:r.update(status='uncertain',note='展示结果未知，未自动重发。')
     continue
    late=(at-moment(r['due'])).total_seconds()
-   if at>=moment(r['start']) or late>600:r.update(status='missed',note='已错过补提醒窗口，未集中弹出过期提醒。')
+   if (at>=moment(r['start']) and not (r['lead_minutes']==0 and 0<=late<=60)) or late>600:r.update(status='missed',note='已错过补提醒窗口，未集中弹出过期提醒。')
    elif late>=0:r.update(status='ready',catchup=late>5,note='补提醒' if late>5 else '')
    else:r.update(status='scheduled',note='')
 def claim(channel='page'):

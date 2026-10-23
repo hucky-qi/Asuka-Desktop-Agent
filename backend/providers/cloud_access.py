@@ -277,6 +277,7 @@ def execute_understood(c,sid,epoch,rid,cancel,text,emit,task,options):
  # A schema-valid calendar offer is only an ask, never a write. Honor it even
  # when the coarse chat route conflicts; all calendar data gates below still apply.
  if route=='chat' and getattr(adapter,'calendar_action',None)=='offer':route=decision['route']='calendar'
+ if route=='clarify' and decision.get('resume_pending') and (c.calendar_pending or {}).get('owner')==g['id'] and ((c.calendar_pending or {}).get('fields') or {}).get('stage') in ('uncommitted_create','uncommitted_carrier'):route=decision['route']='calendar';adapter.calendar_action='clarify'
  with session_lock:
   task.check()
   MemoryAccess.validate_refs(c,getattr(adapter,'retrieved_refs',[]),'cloud')
