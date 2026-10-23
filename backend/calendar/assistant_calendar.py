@@ -202,7 +202,7 @@ def action_run(args,task,c):
  if operation=='create' and not cancel and data.get('status')=='verified':
   data=calendar_create.finish_reminder(data,body,c,task)
  status=data.get('status')
- if operation=='create' and not cancel and status in ('verified','uncertain','writing') and ((c.calendar_pending or {}).get('fields') or {}).get('stage')=='uncommitted_create':c.calendar_pending=None
+ if operation=='create' and not cancel and status in ('verified','uncertain','writing') and ((c.calendar_pending or {}).get('fields') or {}).get('stage') in ('uncommitted_create','uncommitted_carrier'):c.calendar_pending=None
  state='completed' if status=='verified' else 'writing' if status=='writing' else 'cancelled' if status=='cancelled' else 'needs_input' if status in ('preview','conflict_confirmation_required','duplicate_confirmation_required','uncertain','stale') else 'failed'
  return Outcome('calendar_confirmation',data,status=state)
 TOOLS.register('calendar.confirmation','calendar_confirm',action_validate,action_run)

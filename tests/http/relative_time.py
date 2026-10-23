@@ -24,7 +24,7 @@ class Model(bb.Dependencies):
   self.reply({'id':'synthetic-response','model':'deepseek-flash','choices':[{'message':{'role':'assistant','content':json.dumps(answer,ensure_ascii=False)},'finish_reason':'stop'}],'usage':{'prompt_tokens':100,'completion_tokens':100,'total_tokens':200}})
 class Calendar:
  def __init__(self,app):
-  self.root=app/'.runtime/calendar-ipc';self.root.mkdir(parents=True);self.mode='ok';self.change_after_create=False;self.calls=[];self.writes=[];self.events={};self.stop=threading.Event();self.thread=threading.Thread(target=self.loop,daemon=True);self.thread.start()
+  self.root=app/'.runtime/calendar-ipc';self.root.mkdir(parents=True);self.mode='ok';self.change_after_create=False;self.catalog=None;self.calls=[];self.writes=[];self.events={};self.stop=threading.Event();self.thread=threading.Thread(target=self.loop,daemon=True);self.thread.start()
  def loop(self):
   import os
   while not self.stop.wait(.01):
@@ -39,7 +39,7 @@ class Calendar:
      if self.mode=='ok' and d.get('action')=='reminder_check':
       if d['event_id'] in self.events:r['event']=copy.deepcopy(self.events[d['event_id']])
       else:r['status']='not_found'
-     if self.mode=='ok' and d.get('action')=='catalog':r['calendars']=[{'id':'synthetic-local','title':'合成日历','default':True,'writable':True}];r['duplicates']=[]
+     if self.mode=='ok' and d.get('action')=='catalog':r['calendars']=self.catalog or [{'id':'synthetic-local','title':'合成日历','default':True,'writable':True}];r['duplicates']=[]
      if self.mode=='ok' and d.get('action')=='create':
       self.writes.append(copy.deepcopy(d));eid='synthetic-event-'+d['operation_id'];self.events[eid]=dict(d['event'],event_id=eid,calendar_id=d['calendar_id'],calendar_title='合成日历',version='v1',reminder_supported=True,recurring=False,shared=False,has_attendees=False);r.update(status='verified',event_id=eid,event=d['event'])
       if self.change_after_create:self.events[eid]['title']='合成外部变更'
@@ -162,6 +162,9 @@ def main(expectations,out):
     setclock(BASE);sid=new();q='30min之后提醒我做合成校对，提前10分钟';d,_=run(sid,q,plan(operation='reminder',create={'title':'合成校对'},reminder={'timing':'explicit','lead_minutes':10,'calendar_policy':'unknown'},start_time={'kind':'relative','section':'create','expression':'30min之后'}));assert preview(d) and preview(d)['assistant_reminder']['lead_minutes']==10,d
     sid=new();d,_=run(sid,'30分钟后只提醒，不要加入日历',plan(operation='reminder',create={'title':'合成校对'},reminder={'timing':'default','lead_minutes':None,'calendar_policy':'excluded'},start_time={'kind':'relative','section':'create','expression':'30分钟后'}));assert not preview(d),d
    check('unknown_carrier_preview_does_not_override_explicit_exclusion',unknown_carrier_is_explicit_preview)
+   def choose_calendar_without_rebasing():
+    setclock(BASE);cal.catalog=[{'id':'synthetic-local','title':'合成日历','default':True,'writable':True},{'id':'synthetic-work','title':'合成工作','default':False,'writable':True}];sid=new();d,_=run(sid,'过两小时安排合成分类',plan(create={'title':'合成分类'},start_time={'kind':'relative','section':'create','expression':'过两小时'}));v=preview(d);setclock('2033-01-02T00:05:17+11:00');r=post('/api/bubble/calendar/revise',session_id=sid,preview_id=v['id'],calendar_id='synthetic-work');assert r['calendar_preview']['calendar_id']=='synthetic-work' and r['calendar_preview']['start']==v['start'] and r['calendar_preview']['relative_time']==v['relative_time'],r;old=post('/api/bubble/calendar/confirm',session_id=sid,preview_id=v['id'],confirm=True);assert old.get('error'),old;cal.catalog=None
+   check('calendar_selection_preserves_anchor_and_invalidates_prior_confirmation',choose_calendar_without_rebasing)
    def duplicate():
     setclock(BASE);sid=new();d,_=run(sid,'30分钟后安排合成复盘',plan(create={'title':'合成复盘','date':'30分钟后','start':None}));v=preview(d);assert v,d
     a=post('/api/bubble/calendar/confirm',session_id=sid,preview_id=v['id'],confirm=True);b=post('/api/bubble/calendar/confirm',session_id=sid,preview_id=v['id'],confirm=True);assert a['status']==b['status']=='verified' and len(cal.writes)==1,(a,b,cal.writes)

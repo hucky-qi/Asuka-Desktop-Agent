@@ -37,6 +37,11 @@ def main(out):
   def expired():
    sid,p=preview(40);now('2033-01-02T00:01:17+11:00');before=len(cal.writes);r=confirm(sid,p,30);assert r.get('error') and len(cal.writes)==before,r
   check('waiting_invalidates_old_advance_without_changing_start',expired)
+  def carrier_completed_not_unwritten():
+   now(f.BASE);sid=post('session')['session_id'];q='两小时后提醒我做合成复盘，提前10分钟';f.Model.plans[q]=f.plan(operation='reminder',create={'title':'合成复盘'},reminder={'timing':'explicit','lead_minutes':10,'calendar_policy':'allowed'},start_time={'kind':'relative','section':'create','expression':'两小时后'})
+   x=f.bb.Stream(base,'/api/bubble/chat',{'session_id':sid,'question':q,'web_enabled':False}).start().wait();d=next(v for _,v in reversed(x.events) if v['type'] in ('done','error'));p=d['calendar_preview'];r=post('calendar/confirm',session_id=sid,preview_id=p['id'],confirm=True);assert r['status']=='verified',r
+   q='再补充一个标题';f.Model.plans[q]=f.plan(operation='reminder',resume=True,create={'title':'合成新题'},reminder={'timing':'explicit','lead_minutes':10,'calendar_policy':'allowed'});before=len(cal.writes);x=f.bb.Stream(base,'/api/bubble/chat',{'session_id':sid,'question':q,'web_enabled':False}).start().wait();d=next(v for _,v in reversed(x.events) if v['type'] in ('done','error'));assert not d.get('calendar_preview') and not d.get('calendar_draft') and len(cal.writes)==before,d
+  check('verified_carrier_no_longer_reused_as_unwritten_draft',carrier_completed_not_unwritten)
   def ordinary():
    sid,p=preview();r=post('calendar/confirm',session_id=sid,preview_id=p['id'],confirm=True);assert r['status']=='verified' and r.get('assistant_reminder',{}).get('status')!='saved',r
   check('ordinary_creation_never_adds_reminder',ordinary)
