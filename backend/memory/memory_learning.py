@@ -35,6 +35,8 @@ def validate(data):
   if not isinstance(c,dict) or c.get('key') not in KEYS or c.get('value') not in VALUES[c['key']] or c.get('scenario') not in SCENARIOS or c.get('status') not in ('candidate','active','conflict','rejected','superseded') or not isinstance(c.get('id'),str) or not isinstance(c.get('evidence'),list) or len(c['evidence'])>6:raise ValueError('学习证据格式无效，未覆盖记忆。')
  for b in data['blocked']:
   if b.get('key') not in KEYS or b.get('scenario') not in SCENARIOS:raise ValueError('学习遗忘记录无效。')
+ if 'chat_sources' in data:__import__('backend.memory.chat_sources',fromlist=['*']).validate(data['chat_sources'])
+ if 'distillation' in data:__import__('backend.memory.periodic_distillation',fromlist=['*']).validate(data['distillation'])
  return copy.deepcopy(data)
 def overlaps(a,b):return a==b or 'general' in (a,b)
 def suppress(state,key,scenario='general'):

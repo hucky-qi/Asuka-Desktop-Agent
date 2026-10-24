@@ -47,7 +47,7 @@ def import_files(key,selected=False):
 
 def handle(handler,body):
  route=handler.path.removeprefix('/api/assistant/')
- if route not in {'session','model','memory','chat','cancel','reset','calendar/update/choose','calendar/update/deselect','calendar/update/select','calendar/update/confirm','calendar/update/cancel','calendar/delete/preview','calendar/delete/confirm','calendar/delete/cancel','calendar/confirm','calendar/cancel','calendar/revise','calendar/more','calendar/refresh','calendar/offer','files/sync','files/select','files/qa'}:raise ValueError('未知网页助手接口')
+ if route not in {'session','model','memory','chat','cancel','reset','calendar/update/choose','calendar/update/deselect','calendar/update/select','calendar/update/confirm','calendar/update/cancel','calendar/delete/preview','calendar/delete/confirm','calendar/delete/cancel','calendar/confirm','calendar/cancel','calendar/revise','calendar/more','calendar/refresh','calendar/offer','calendar/reminder/recheck','calendar/reminder/status','files/sync','files/select','files/qa'}:raise ValueError('未知网页助手接口')
  recovery_note=None
  if route=='session' and body.get('recover') is True:
   __import__('backend.assistant.session_lifecycle', fromlist=['*']).validate_hint(body.get('resume_hint'))

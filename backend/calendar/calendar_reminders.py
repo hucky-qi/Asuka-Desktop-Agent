@@ -72,6 +72,9 @@ def store():
      try:os.fsync(directory)
      finally:os.close(directory)
     finally:temp.unlink(missing_ok=True)
+class ReminderEligibilityError(ValueError):
+ def __init__(self,code,message,event=None,retryable=False):
+  super().__init__(message);self.code=code;self.retryable=retryable;self.event_version=(event or {}).get('version')
 def read_event(eid,cid,cancel):
  # Reuse exact-identity read-only branch. No range/conflict query parameters.
  r=native_context.bridge_request({'action':'reminder_check','event_id':eid,'event':{}},cancel)
@@ -80,10 +83,19 @@ def read_event(eid,cid,cancel):
  if not isinstance(r.get('event'),dict):raise ValueError('日历读取失败，暂不投递；不把读取失败当作已删除。')
  e=r['event']
  if e.get('event_id')!=eid or e.get('calendar_id')!=cid:raise ValueError('提醒事件身份不匹配，停止投递。')
- if e.get('reminder_supported') is not True:raise ValueError('当前原生桥接未证明该事件支持提醒；已暂停，未猜测共享状态。')
- if not e.get('version') or e.get('recurring') is not False or e.get('all_day') is not False or e.get('has_attendees') is not False or e.get('shared') is not False:raise ValueError('初版仅支持普通单次非共享、无与会者的定时事件。')
- if moment(e['end'])<=moment(e['start']):raise ValueError('事件起止时间无效，未设置提醒。')
- return {k:copy.deepcopy(e.get(k)) for k in ('event_id','calendar_id','calendar_title','title','start','end','version','timezone')}
+ # Explicit read-only capability from the trusted original native bridge.
+ # Calendar type, writable/shared/attendees do not grant or deny this capability.
+ if type(e.get('local_reminder_contract')) is not int or e['local_reminder_contract']!=1:raise ReminderEligibilityError('bridge_proof_missing','原生只读提醒桥接需要更新或恢复；保留原事件与提醒参数，可重新检查。',e,True)
+ if e.get('local_reminder_supported') is False or e.get('recurring') is True or e.get('all_day') is True:raise ReminderEligibilityError('unsupported_event','目前仅支持能够可靠定位的非全天普通单次事件；重复或分离实例暂不支持本机提醒。',e)
+ if e.get('local_reminder_supported') is not True or e.get('recurring') is not False or e.get('all_day') is not False:raise ReminderEligibilityError('bridge_proof_missing','原生事件实例资格尚未核实；不会凭标题或时间猜测。',e,True)
+ if not all(isinstance(e.get(k),str) and e[k] for k in ('event_id','calendar_id','version','title','start','end','local_reminder_timezone')):raise ReminderEligibilityError('identity_incomplete','原生事件身份、版本或时区信息不完整；请重新检查原事件。',e,True)
+ try:
+  from zoneinfo import ZoneInfo
+  ZoneInfo(e['local_reminder_timezone'])
+  if moment(e['end'])<=moment(e['start']):raise ValueError('invalid interval')
+ except (ValueError,KeyError):raise ReminderEligibilityError('identity_incomplete','原生事件的时间或时区无法核实；没有设置提醒。',e,True) from None
+ result={k:copy.deepcopy(e.get(k)) for k in ('event_id','calendar_id','calendar_title','title','start','end','version')};result['timezone']=e['local_reminder_timezone'];return result
+
 def key(e):return hashlib.sha256((e['calendar_id']+'\0'+e['event_id']).encode()).hexdigest()
 def public(row):return {k:copy.deepcopy(v) for k,v in row.items() if k!='claim_at'}
 def set_plan(event,lead,check=lambda:None,operation_id=None):
@@ -103,7 +115,7 @@ def set_plan(event,lead,check=lambda:None,operation_id=None):
   d['operations'][operation_id]={'id':ident,'signature':sig}
   old=d['items'].get(ident)
   if old and old['event_version']==event['version'] and old['lead_minutes']==lead and old['status'] in ('scheduled','ready','claimed','delivered','read','dismissed'):return public(old)
-  row={'id':ident,'version':old['version']+1 if old else 1,'event_id':event['event_id'],'calendar_id':event['calendar_id'],'calendar_title':event['calendar_title'],'title':event['title'],'start':event['start'],'end':event['end'],'event_version':event['version'],'timezone':native_context.system_clock()['timezone'],'lead_minutes':lead,'due':due.isoformat(),'status':'scheduled','updated_at':at.isoformat(),'delivery_id':None,'catchup':False,'note':''};d['items'][ident]=row
+  row={'id':ident,'version':old['version']+1 if old else 1,'event_id':event['event_id'],'calendar_id':event['calendar_id'],'calendar_title':event['calendar_title'],'title':event['title'],'start':event['start'],'end':event['end'],'event_version':event['version'],'timezone':event['timezone'],'lead_minutes':lead,'due':due.isoformat(),'status':'scheduled','updated_at':at.isoformat(),'delivery_id':None,'catchup':False,'note':''};d['items'][ident]=row
   return public(row)
 def listing():
  with store() as d:return [public(x) for x in d['items'].values()]
@@ -141,7 +153,7 @@ def sync():
     if r.get('delivery_id') and native_enabled():__import__('backend.calendar.reminder_native', fromlist=['*']).cancel(r['delivery_id'])
     r.pop('paused_delivery_status',None)
     r.update(title=e['title'],start=e['start'],end=e['end'],timezone=e['timezone'],calendar_title=e['calendar_title'],event_version=e['version'],due=(moment(e['start'])-dt.timedelta(seconds=r.get('snooze_before_start_seconds',r['lead_minutes']*60))).isoformat(),status='scheduled',delivery_id=None,version=r['version']+1)
-   r['timezone']=native_context.system_clock()['timezone']
+   r['timezone']=e['timezone']
    if r.get('paused_delivery_status'):
     r['status']=r.pop('paused_delivery_status');r['note']='事件已重新核对，保留原投递结果，不重复发送。'
    if r['status'] in ('delivered','read','system_accepted','system_visible','user_viewed'):

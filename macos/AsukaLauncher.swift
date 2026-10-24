@@ -1,4 +1,9 @@
 import AppKit
+import Darwin
+
+private func reminderTimeValid(_ start:Date,_ lead:Int?,_ now:Date=Date())->Bool {
+    return start>now || (lead==0 && now.timeIntervalSince(start)>=0 && now.timeIntervalSince(start)<=60)
+}
 import EventKit
 import CryptoKit
 import UserNotifications
@@ -50,7 +55,7 @@ final class CalendarReadBridge {
         mailboxQueue.async{[weak self] in guard let self else{return};self.tick();DispatchQueue.main.async{self.mailboxReading=false}}
     }
     func tick() {
-        save(["pid":ProcessInfo.processInfo.processIdentifier,"bundle":Bundle.main.bundleIdentifier ?? "","version":6],root.appendingPathComponent("ready.json"))
+        save(["pid":ProcessInfo.processInfo.processIdentifier,"bundle":Bundle.main.bundleIdentifier ?? "","version":7],root.appendingPathComponent("ready.json"))
         // Read only the explicit mailbox. Directory enumeration may block macOS launch.
         let mailbox=root.appendingPathComponent("queue.json")
         let ids=(try? Data(contentsOf:mailbox)).flatMap {try? JSONSerialization.jsonObject(with:$0)} as? [String] ?? []
@@ -75,20 +80,23 @@ final class CalendarReadBridge {
             else if status == .denied {state="denied"}
             else if status == .restricted {state="restricted"}
             else if #available(macOS 14.0,*),status == .writeOnly {state="write_only"}
-            else {state="allowed"}
-            save(["id":id,"status":state,"source":"EventKit.authorizationStatus","previously_allowed_marker":wasGranted,"bundle":Bundle.main.bundleIdentifier ?? ""],file);return
+            else if #available(macOS 14.0,*),status == .fullAccess {state="allowed"}
+            else if #unavailable(macOS 14.0),status == .authorized {state="allowed"}
+            else {state="read_error"}
+            save(["id":id,"status":state,"source":"EventKit.authorizationStatus","raw_status":status.rawValue,"request_pending":requestingPermission,"pid":ProcessInfo.processInfo.processIdentifier,"previously_allowed_marker":wasGranted,"bundle":Bundle.main.bundleIdentifier ?? ""],file);return
+        }
+        if q["action"] as? String == "permission_authorize" {
+            guard q["explicit_user_action"] as? Bool==true else{save(["id":id,"status":"invalid"],file);return}
+            if status == .notDetermined {
+                save(["id":id,"status":requestingPermission ? "authorization_pending":"authorization_required"],file)
+                DispatchQueue.main.async{self.authorizeCalendar()}
+            } else {var request=q;request["action"]="permission_status";respond(id,request,file)}
+            return
         }
         if q["action"] as? String == "reminder_check",status == .notDetermined {save(["id":id,"status":"authorization_required"],file);return}
         if status == .notDetermined {
             save(["id":id,"status":"authorization_required"],file)
-            guard !requestingPermission else{return};requestingPermission=true
-            if #available(macOS 14.0,*) {
-                store.requestFullAccessToEvents { [weak self] granted,_ in
-                    DispatchQueue.main.async {self?.requestingPermission=false;if granted {self?.rememberAllowed()} }
-                }
-            } else { store.requestAccess(to:.event) { [weak self] granted,_ in
-                DispatchQueue.main.async {self?.requestingPermission=false;if granted {self?.rememberAllowed()} }
-            }}
+            DispatchQueue.main.async {self.authorizeCalendar()}
             return
         }
         if status == .denied {save(["id":id,"status":wasGranted ? "revoked":"denied"],file);return}
@@ -113,6 +121,30 @@ final class CalendarReadBridge {
         let events=reader.events(matching:predicate).filter{$0.startDate < interval.1 && $0.endDate > interval.0}.sorted{ $0.startDate == $1.startDate ? ($0.title ?? "") < ($1.title ?? "") : $0.startDate < $1.startDate }
         let rows:[[String:Any]]=events.prefix(5000).map{["title":String(($0.title ?? "无标题").prefix(200)),"start":formatter.string(from:$0.startDate),"end":formatter.string(from:$0.endDate),"all_day":$0.isAllDay,"event_id":$0.eventIdentifier ?? $0.calendarItemIdentifier,"calendar_id":$0.calendar.calendarIdentifier,"calendar_title":$0.calendar.title]}
         save(["id":id,"status":"ok","timezone":TimeZone.autoupdatingCurrent.identifier,"start":formatter.string(from:interval.0),"end":formatter.string(from:interval.1),"events":rows,"total":events.count,"partial":events.count>5000,"calendars_scope":"all_authorized"],file)
+    }
+    func authorizeCalendar() {
+        guard EKEventStore.authorizationStatus(for:.event) == .notDetermined,!requestingPermission else{return}
+        requestingPermission=true
+        let complete:(Bool,Error?)->Void = { [weak self] granted,_ in
+            DispatchQueue.main.async {self?.requestingPermission=false;if granted{self?.rememberAllowed()}}
+        }
+        if #available(macOS 14.0,*){store.requestFullAccessToEvents(completion:complete)}
+        else{store.requestAccess(to:.event,completion:complete)}
+    }
+    func showPermissionControls() {
+        let status=EKEventStore.authorizationStatus(for:.event),alert=NSAlert()
+        alert.messageText="日历访问权限"
+        if status == .notDetermined {
+            alert.informativeText="当前系统权限尚未决定。继续授权只请求日历访问，不读取日程或创建事件；已有聊天、事项和时间保持不变。允许后返回原任务重新检查。"
+            alert.addButton(withTitle:"继续授权");alert.addButton(withTitle:"取消")
+            if alert.runModal() == .alertFirstButtonReturn {authorizeCalendar()}
+        } else {
+            let allowed:Bool
+            if #available(macOS 14.0,*){allowed=status == .fullAccess}else{allowed=status == .authorized}
+            alert.informativeText=allowed ? "系统当前允许读取日历。返回原任务点击重新检查；不会自动创建或开启提醒。":"系统当前未允许完全访问。请到系统设置 → 隐私与安全性 → 日历中检查明日香小助手；返回原任务重新检查。不会清空系统权限，也不保证拒绝后再次弹窗。"
+            alert.addButton(withTitle:allowed ? "完成":"打开系统设置");if !allowed{alert.addButton(withTitle:"取消")}
+            if alert.runModal() == .alertFirstButtonReturn && !allowed,let url=URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars"){NSWorkspace.shared.open(url)}
+        }
     }
     // Creation is available only through a confirmed local IPC operation. No alarms/recurrence.
     func createAction(_ id:String,_ q:[String:Any],_ file:URL) {
@@ -206,7 +238,7 @@ final class CalendarReadBridge {
             let stable=preserved(event)
             let local=event.calendar.type == .local && event.calendar.source?.sourceType == .local && !event.calendar.isSubscribed
             let version=hash(["preserved":stable,"title":event.title ?? "","start":event.startDate.timeIntervalSince1970,"end":event.endDate.timeIntervalSince1970,"modified":event.lastModifiedDate?.timeIntervalSince1970 ?? -1,"recurring":!(event.recurrenceRules ?? []).isEmpty || event.isDetached,"attendees":!(event.attendees ?? []).isEmpty || event.organizer != nil,"writable":event.calendar.allowsContentModifications])
-            return ["reminder_supported":local && !event.isAllDay && (event.recurrenceRules ?? []).isEmpty && !event.isDetached && (event.attendees ?? []).isEmpty && event.organizer == nil,"shared":local ? false as Any : NSNull() as Any,"calendar_type":event.calendar.type.rawValue,"event_id":event.eventIdentifier ?? "","title":event.title ?? "无标题","start":formatter.string(from:event.startDate),"end":formatter.string(from:event.endDate),"timezone":TimeZone.autoupdatingCurrent.identifier,"calendar_id":event.calendar.calendarIdentifier,"calendar_title":event.calendar.title,"all_day":event.isAllDay,"writable":event.calendar.allowsContentModifications,"recurring":!(event.recurrenceRules ?? []).isEmpty || event.isDetached,"has_attendees":!(event.attendees ?? []).isEmpty || event.organizer != nil,"version":version,"preserved_version":stable,"delete_supported":event.calendar.type == .local && !event.isAllDay && event.calendar.allowsContentModifications && (event.recurrenceRules ?? []).isEmpty && !event.isDetached && (event.attendees ?? []).isEmpty && event.organizer == nil]
+            return ["local_reminder_contract":1,"local_reminder_supported":!event.isAllDay && (event.recurrenceRules ?? []).isEmpty && !event.isDetached,"local_reminder_timezone":event.timeZone?.identifier ?? TimeZone.autoupdatingCurrent.identifier,"reminder_supported":local && !event.isAllDay && (event.recurrenceRules ?? []).isEmpty && !event.isDetached && (event.attendees ?? []).isEmpty && event.organizer == nil,"shared":local ? false as Any : NSNull() as Any,"calendar_type":event.calendar.type.rawValue,"event_id":event.eventIdentifier ?? "","title":event.title ?? "无标题","start":formatter.string(from:event.startDate),"end":formatter.string(from:event.endDate),"timezone":TimeZone.autoupdatingCurrent.identifier,"calendar_id":event.calendar.calendarIdentifier,"calendar_title":event.calendar.title,"all_day":event.isAllDay,"writable":event.calendar.allowsContentModifications,"recurring":!(event.recurrenceRules ?? []).isEmpty || event.isDetached,"has_attendees":!(event.attendees ?? []).isEmpty || event.organizer != nil,"version":version,"preserved_version":stable,"delete_supported":event.calendar.type == .local && !event.isAllDay && event.calendar.allowsContentModifications && (event.recurrenceRules ?? []).isEmpty && !event.isDetached && (event.attendees ?? []).isEmpty && event.organizer == nil]
         }
         func suitable(_ e:EKEvent)->Bool {e.calendar.allowsContentModifications && !e.isAllDay && (e.recurrenceRules ?? []).isEmpty && !e.isDetached && (e.attendees ?? []).isEmpty && e.organizer == nil}
         let target=q["event"] as? [String:Any] ?? [:]
@@ -318,6 +350,8 @@ final class ReminderNotificationBridge:NSObject,UNUserNotificationCenterDelegate
     private let permissionLock=NSLock()
     private var permissionPending=false
     private var statusItem:NSStatusItem?
+    var calendarAccess:(()->Void)?
+    var startupRecovery:(()->Void)?
     private var pendingRows=[String:[String:Any]](),notificationFocus=""
     private var motionObserver:NSObjectProtocol?
     func endPermission(){permissionLock.lock();permissionPending=false;permissionLock.unlock()}
@@ -343,8 +377,10 @@ final class ReminderNotificationBridge:NSObject,UNUserNotificationCenterDelegate
         if let image {image.size=NSSize(width:18,height:18);image.isTemplate=false;item.button?.image=image}
         else {item.button?.title="明日香"}
         item.button?.toolTip="明日香小助手"
-        let menu=NSMenu();let test=NSMenuItem(title:"测试提醒（不访问日历）",action:#selector(openTest),keyEquivalent:"");test.target=self;menu.addItem(test);item.menu=menu;statusItem=item
+        let menu=NSMenu();let test=NSMenuItem(title:"测试提醒（不访问日历）",action:#selector(openTest),keyEquivalent:"");test.target=self;menu.addItem(test);let calendar=NSMenuItem(title:"日历访问权限…",action:#selector(calendarPermission),keyEquivalent:"");calendar.target=self;menu.addItem(calendar);let resume=NSMenuItem(title:"继续启动人物…",action:#selector(recoverStartup),keyEquivalent:"");resume.target=self;menu.addItem(resume);item.menu=menu;statusItem=item
     }
+    @objc func calendarPermission(){calendarAccess?()}
+    @objc func recoverStartup(){startupRecovery?()}
     @objc func openTest(){
         guard let raw=try? Data(contentsOf:root.appendingPathComponent("test-capability.json")),let d=(try? JSONSerialization.jsonObject(with:raw)) as? [String:Any],let token=d["token"] as? String,
               let url=URL(string:"http://127.0.0.1:8765/reminder-notifications#"+token) else{return}
@@ -357,7 +393,7 @@ final class ReminderNotificationBridge:NSObject,UNUserNotificationCenterDelegate
         guard let id=r["id"] as? String,let version=r["version"] as? Int,let delivery=r["delivery_id"] as? String,
               let bytes=try? Data(contentsOf:r["synthetic"] as? Bool==true ? root.deletingLastPathComponent().appendingPathComponent("reminder-tests/plans.json"):plans),let store=(try? JSONSerialization.jsonObject(with:bytes)) as? [String:Any],
               let items=store["items"] as? [String:[String:Any]],let row=items[id],row["version"] as? Int==version,row["delivery_id"] as? String==delivery else{return false}
-        if let text=row["start"] as? String,let start=ISO8601DateFormatter().date(from:text),start<=Date(){return false}
+        if let text=row["start"] as? String,let start=ISO8601DateFormatter().date(from:text),!reminderTimeValid(start,row["lead_minutes"] as? Int){return false}
         return ["claimed","system_accepted","system_visible","user_viewed"].contains(row["status"] as? String ?? "")
     }
     func tick() {
@@ -396,12 +432,24 @@ final class ReminderNotificationBridge:NSObject,UNUserNotificationCenterDelegate
             if test,let old=try? Data(contentsOf:root.appendingPathComponent("last-test.json")),let d=(try? JSONSerialization.jsonObject(with:old)) as? [String:Double],Date().timeIntervalSince1970-(d["at"] ?? 0)<60 {reply(["status":"test_throttled"]);continue}
             if test {self.save(["at":Date().timeIntervalSince1970],self.root.appendingPathComponent("last-test.json"))}
             if test || r["synthetic"] as? Bool==true {
-                let budget=root.appendingPathComponent("delivery-test-budget-shared-reminder.json")
+                var budget=root.appendingPathComponent("delivery-test-budget-shared-reminder.json")
+                var limit=3
+                let active=root.appendingPathComponent("delivery-test-active.json")
+                if FileManager.default.fileExists(atPath:active.path) {
+                    guard let raw=try? Data(contentsOf:active),let config=(try? JSONSerialization.jsonObject(with:raw)) as? [String:Any],
+                          let round=config["round"] as? String,round.count==32,round.allSatisfy({$0.isHexDigit}) else{reply(["status":"test_budget_unreadable"]);continue}
+                    budget=root.appendingPathComponent("delivery-test-"+round+".json")
+                    guard let raw=try? Data(contentsOf:budget),let grant=(try? JSONSerialization.jsonObject(with:raw)) as? [String:Any],
+                          grant["round"] as? String==round,grant["closed"] as? Bool==false,
+                          let cap=grant["limit"] as? Int,(1...3).contains(cap),let used=grant["used"] as? Int,used>=0,
+                          let expires=grant["expires"] as? Double,expires>Date().timeIntervalSince1970 else{reply(["status":"test_budget_exhausted"]);continue}
+                    limit=cap
+                }
                 let raw=try? Data(contentsOf:budget)
                 if FileManager.default.fileExists(atPath:budget.path) && raw.flatMap({try? JSONSerialization.jsonObject(with:$0)}) as? [String:Any] == nil {reply(["status":"test_budget_unreadable"]);continue}
                 var d=(raw.flatMap{try? JSONSerialization.jsonObject(with:$0)} as? [String:Any]) ?? ["used":0]
                 let used=d["used"] as? Int ?? 3
-                if d["closed"] as? Bool==true || used>=3 {reply(["status":"test_budget_exhausted"]);continue}
+                if d["closed"] as? Bool==true || used>=limit {reply(["status":"test_budget_exhausted"]);continue}
                 d["used"]=used+1;save(d,budget)
             }
             center.getNotificationSettings { state in
@@ -528,16 +576,30 @@ final class LocalSpeechBridge {
     }
 }
 
+// STARTUP_RECEIPT_BEGIN
+struct StartupReceipt {
+    static func entered(_ state:[String:Any]?,since:Date,pid:Int32)->Bool {
+        guard pid>0,let state,let owner=state["entry_pid"] as? Int,owner==Int(pid),
+              let at=state["at"] as? Double,at>=since.timeIntervalSince1970,
+              let status=state["status"] as? String,["starting","ready","fallback","reused","exited","error"].contains(status) else{return false}
+        return true
+    }
+}
+// STARTUP_RECEIPT_END
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var worker: Process?
+    private var startupGeneration=0
+    private var startupPending=false
+    private var accessURL:URL?
+    private var failureShowing=false
     private var calendarBridge: CalendarReadBridge?
     private var reminderBridge: ReminderNotificationBridge?
     private var speechBridge: AnyObject?
     private var stopObserver: NSObjectProtocol?
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if let path=Bundle.main.object(forInfoDictionaryKey:"AsukaProjectPath") as? String {if #available(macOS 26.0,*) {speechBridge=LocalSpeechBridge(URL(fileURLWithPath:path))};calendarBridge=CalendarReadBridge(URL(fileURLWithPath:path));reminderBridge=ReminderNotificationBridge(URL(fileURLWithPath:path))}
+        if let path=Bundle.main.object(forInfoDictionaryKey:"AsukaProjectPath") as? String {if #available(macOS 26.0,*) {speechBridge=LocalSpeechBridge(URL(fileURLWithPath:path))};calendarBridge=CalendarReadBridge(URL(fileURLWithPath:path));reminderBridge=ReminderNotificationBridge(URL(fileURLWithPath:path));reminderBridge?.calendarAccess={ [weak self] in self?.calendarBridge?.showPermissionControls() };reminderBridge?.startupRecovery={ [weak self] in self?.chooseProjectAccess() }}
         stopObserver=DistributedNotificationCenter.default().addObserver(forName:NSNotification.Name("local.filechat.asuka.launcher.stop"),object:nil,queue:.main){_ in NSApp.terminate(nil)}
-        launch()
+        restoreProjectAccess();launch()
     }
     func applicationWillTerminate(_ notification:Notification) {if #available(macOS 26.0,*) {(speechBridge as? LocalSpeechBridge)?.cancel()}}
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -545,30 +607,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if worker?.isRunning != true { launch() }
         return false
     }
-    private func failure(_ message: String) {
-        let alert=NSAlert(); alert.messageText="明日香助手启动失败"
-        alert.informativeText=message;alert.alertStyle = .warning
-        NSApp.activate(ignoringOtherApps:true);alert.runModal();NSApp.terminate(nil)
+    private func failure(_ message:String) {
+        guard !failureShowing else{return};failureShowing=true
+        let alert=NSAlert();alert.messageText="人物尚未启动";alert.informativeText=message
+        alert.addButton(withTitle:"允许项目文件访问…");alert.addButton(withTitle:"重试");alert.addButton(withTitle:"暂不处理")
+        let choice=alert.runModal();failureShowing=false
+        if choice == .alertFirstButtonReturn{chooseProjectAccess()}
+        else if choice == .alertSecondButtonReturn{launch()}
+    }
+    private func restoreProjectAccess(){
+        guard let data=UserDefaults.standard.data(forKey:"AsukaProjectAccessBookmark") else{return}
+        var stale=false
+        if let url=try? URL(resolvingBookmarkData:data,options:[.withSecurityScope,.withoutUI],relativeTo:nil,bookmarkDataIsStale:&stale),!stale {
+            _=url.startAccessingSecurityScopedResource();accessURL=url
+        }
+    }
+    private func projectPython(_ root:URL)->URL {root.appendingPathComponent(".venv/bin/python")}
+    private func chooseProjectAccess(){
+        guard let project=Bundle.main.object(forInfoDictionaryKey:"AsukaProjectPath") as? String else{return}
+        let folder=projectPython(URL(fileURLWithPath:project)).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent(),panel=NSOpenPanel()
+        panel.canChooseDirectories=true;panel.canChooseFiles=false;panel.allowsMultipleSelection=false;panel.directoryURL=folder
+        panel.message="请选择当前项目及其Python环境所在目录，仅用于读取现有启动文件。不会扫描或索引文件，也不会访问日历。";panel.prompt="允许此项目目录"
+        guard panel.runModal() == .OK,let selected=panel.url else{return}
+        guard selected.standardizedFileURL==folder.standardizedFileURL else{failure("请选择原项目及Python环境所在目录；不会切换到其他项目。");return}
+        accessURL?.stopAccessingSecurityScopedResource();_=selected.startAccessingSecurityScopedResource();accessURL=selected
+        if let bookmark=try? selected.bookmarkData(options:.withSecurityScope,includingResourceValuesForKeys:nil,relativeTo:nil){UserDefaults.standard.set(bookmark,forKey:"AsukaProjectAccessBookmark")}
+        launch()
+    }
+    private func healthyCompanion(_ root:URL)->Bool {
+        let descriptor=open(root.appendingPathComponent(".desktop-pet.lock").path,O_RDWR)
+        guard descriptor>=0 else{return false};defer{close(descriptor)}
+        if flock(descriptor,LOCK_EX|LOCK_NB)==0{flock(descriptor,LOCK_UN);return false}
+        guard errno==EWOULDBLOCK,let url=URL(string:"http://127.0.0.1:8765/api/health") else{return false}
+        var valid=false;let done=DispatchSemaphore(value:0)
+        var request=URLRequest(url:url);request.timeoutInterval=2
+        let task=URLSession.shared.dataTask(with:request){data,_,_ in
+            if let data,let health=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any]{valid=health["service"] as? String=="local-file-chat" && health["project"] as? String==root.path}
+            done.signal()
+        };task.resume();let result=done.wait(timeout:.now()+3);if result != .success{task.cancel();return false};return valid
     }
     private func launch() {
-        guard let project=Bundle.main.object(forInfoDictionaryKey:"AsukaProjectPath") as? String else { failure("入口缺少项目位置，请用项目脚本重新生成。");return }
-        let root=URL(fileURLWithPath:project), python=root.appendingPathComponent(".venv/bin/python")
-        let script=root.appendingPathComponent("macos/desktop_entry.py"), runtime=root.appendingPathComponent(".runtime",isDirectory:true)
-        guard FileManager.default.fileExists(atPath:python.path), FileManager.default.fileExists(atPath:script.path) else { failure("找不到项目虚拟环境或启动程序。项目位置：\(project)");return }
-        do {
-            try FileManager.default.createDirectory(at:runtime,withIntermediateDirectories:true)
-            let job=Process();job.executableURL=python;job.arguments=[script.path];job.currentDirectoryURL=root
-            var environment=ProcessInfo.processInfo.environment;environment["TMPDIR"]=runtime.path+"/";job.environment=environment
-            // The Python bootstrap writes only the existing command's output
-            // to a private project log, not credentials or environment dumps.
-            job.standardInput=FileHandle.nullDevice;job.standardOutput=FileHandle.nullDevice;job.standardError=FileHandle.nullDevice
-            job.terminationHandler={ process in DispatchQueue.main.async {
-                if process.terminationStatus==0 { /* Keep the existing app identity for read-only EventKit requests. */ }
-                else { self.failure("请查看项目内 .runtime/asuka-app.log。不会结束后端、Ollama 或其他程序。") }
-            }}
-            worker=job;try job.run()
-        } catch { failure("无法执行项目启动程序，请检查目录权限和虚拟环境。") }
+        guard !startupPending,worker?.isRunning != true else{return} // Never start beside a live startup transaction.
+        guard let project=Bundle.main.object(forInfoDictionaryKey:"AsukaProjectPath") as? String else{failure("入口缺少项目位置，请检查原应用配置。");return}
+        let root=URL(fileURLWithPath:project),python=projectPython(root)
+        let script=root.appendingPathComponent("macos/desktop_entry.py"),runtime=root.appendingPathComponent(".runtime",isDirectory:true)
+        startupGeneration+=1;startupPending=true;let generation=startupGeneration,started=Date()
+        let job=Process();job.executableURL=python;job.arguments=[script.path];job.currentDirectoryURL=root
+        var environment=ProcessInfo.processInfo.environment;environment["TMPDIR"]=runtime.path+"/";job.environment=environment
+        job.standardInput=FileHandle.nullDevice;job.standardOutput=FileHandle.nullDevice;job.standardError=FileHandle.nullDevice
+        job.terminationHandler={ [weak self] process in DispatchQueue.main.async{
+            guard let self else{return}
+            guard self.startupGeneration==generation else{if self.worker === process{self.worker=nil};return}
+            self.startupPending=false;self.worker=nil
+            if process.terminationStatus != 0{self.failure("现有启动脚本未完成（退出码\(process.terminationStatus)）。请检查项目文件访问及项目.runtime/asuka-app.log；不会结束后端或其他程序。")}
+        }}
+        worker=job
+        // Filesystem/TCC I/O cannot freeze the app's main thread or permission menus.
+        DispatchQueue.global(qos:.userInitiated).async { [weak self] in
+            do{
+                if let self,self.healthyCompanion(root) {
+                    DispatchQueue.main.async{if self.startupGeneration==generation{self.startupPending=false;self.worker=nil}}
+                    return
+                }
+                try FileManager.default.createDirectory(at:runtime,withIntermediateDirectories:true)
+                guard DispatchQueue.main.sync(execute:{self?.startupGeneration==generation && self?.startupPending==true}) else{return}
+                try job.run()
+                if !DispatchQueue.main.sync(execute:{self?.startupGeneration==generation}) && job.isRunning{job.terminate()}
+            }
+            catch{DispatchQueue.main.async{guard let self,self.startupGeneration==generation else{return};self.worker=nil;self.startupPending=false;self.failure("无法执行原项目启动文件，请允许项目文件访问或检查环境。没有另外启动服务。")}}
+        }
+        DispatchQueue.main.asyncAfter(deadline:.now()+12){ [weak self] in
+            guard let self,self.startupGeneration==generation,self.startupPending else{return}
+            // The receipt itself can be blocked by the same file-access problem.
+            // Its bounded fallback runs on the UI queue without filesystem I/O.
+            let failed=DispatchWorkItem { [weak self] in
+                guard let self,self.startupGeneration==generation,self.startupPending else{return}
+                self.startupGeneration+=1;self.startupPending=false
+                if job.isRunning{job.terminate()}else{self.worker=nil}
+                self.failure("尚未确认Python进入项目启动脚本，读取启动文件或状态回执可能正在等待文件访问。请允许项目目录访问后继续；后端和日历任务不会被重置。")
+            }
+            DispatchQueue.main.asyncAfter(deadline:.now()+2,execute:failed)
+            DispatchQueue.global(qos:.utility).async {
+                let data=try? Data(contentsOf:runtime.appendingPathComponent("asuka-app-state.json"))
+                let state=data.flatMap{try? JSONSerialization.jsonObject(with:$0)} as? [String:Any]
+                let fresh=StartupReceipt.entered(state,since:started,pid:job.processIdentifier)
+                DispatchQueue.main.async {
+                    guard self.startupGeneration==generation,self.startupPending else{return}
+                    if fresh{failed.cancel()}else{failed.perform()}
+                }
+            }
+        }
     }
+
 }
 let application=NSApplication.shared
 let delegate=AppDelegate();application.delegate=delegate

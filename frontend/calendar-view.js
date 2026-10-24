@@ -58,13 +58,13 @@ function renderCalendarEvents(meta){
    const panel=el('details','','event-reminder',row);el('summary','助手提醒','',panel);const label=el('label','提前分钟：','',panel),lead=document.createElement('input');lead.type='number';lead.min='0';lead.max='10080';lead.value=String(meta.reminder_request?.lead_minutes??30);if(meta.reminder_request)panel.open=true;lead.style.width='55px';label.append(lead);
    const set=el('button',meta.reminder_request?'确认设置助手提醒':'设置本机提醒','',panel);set.type='button';const note=el('p','默认30分钟，只设置本机助手提醒，不改变日历。需先在设置中启用。','event-calendar',panel);let op=null;
    if(meta.reminder_request){const q=meta.reminder_request;note.textContent=(q.enabled?'':'当前关闭；可从齿轮→本机日程提醒启用后返回。')+(q.timing==='default'?'默认':'')+'提前'+q.lead_minutes+'分钟；'+(q.due?'提醒时间：'+new Date(q.due).toLocaleString('zh-CN',{timeZone:meta.timezone})+'。':'请先选定具体事件。')+'仅设置助手提醒，不添加系统日历提醒；尚未保存。'}
-   set.onclick=async()=>{if(host.active||!box.isConnected||host.epoch!==version)return;set.disabled=true;try{
+   set.onclick=async()=>{if(host.active||!box.isConnected||host.epoch!==version)return;set.disabled=true;let submitting=false;try{
     if(!/^(0|[1-9][0-9]*)$/.test(lead.value)||Number(lead.value)>10080)throw Error('请填写0至10080的整数分钟。');
     const selected=await host.post('/api/bubble/reminders',{session_id:host.sid,action:'select',snapshot_id:meta.snapshot_id,card_token:event.card_token});
     if(!box.isConnected||host.epoch!==version)return;
-    op=op||crypto.randomUUID().replaceAll('-','');const r=await host.post('/api/bubble/reminders',{session_id:host.sid,action:'set',selection_token:selected.selection_token,minutes:Number(lead.value),operation_id:op});
+    op=op||crypto.randomUUID().replaceAll('-','');submitting=true;const r=await host.post('/api/bubble/reminders',{session_id:host.sid,action:'set',selection_token:selected.selection_token,minutes:Number(lead.value),operation_id:op});
     if(box.isConnected&&host.epoch===version){note.textContent=r.message;set.textContent='已保存';}
-   }catch(e){if(box.isConnected&&host.epoch===version)note.textContent=e.message+' 保存结果不明时请查看设置，不要重复提交。'}finally{if(box.isConnected&&host.epoch===version)set.disabled=false}};lead.onchange=()=>{op=null;set.textContent='设置本机提醒'};
+   }catch(e){if(box.isConnected&&host.epoch===version)note.textContent=submitting&&!e.http_status?'提醒保存结果待核对，请查看已有计划，勿重复设置。':host.safeMessage(e.message)}finally{if(box.isConnected&&host.epoch===version)set.disabled=false}};lead.onchange=()=>{op=null;set.textContent='设置本机提醒'};
   }
   if(event.event_id){const edit=el('button','修改','calendar-event-edit',row);edit.type='button';edit.setAttribute('aria-label','修改 '+event.title+' '+time);edit.onclick=()=>{if(box.isConnected&&!host.active&&host.epoch===version)runCalendarUpdate('/choose',{snapshot_id:meta.snapshot_id,event_id:event.event_id,card_token:event.card_token},false,box)};const remove=el('button','删除','calendar-event-delete',row);remove.type='button';remove.onclick=()=>{if(box.isConnected&&!host.active&&host.epoch===version)runCalendarDelete('/preview',{snapshot_id:meta.snapshot_id,event_id:event.event_id,card_token:event.card_token},false,box)}}
  }
@@ -153,6 +153,26 @@ function renderCalendarOffer(offer){
   try{const r=await host.post('/api/bubble/calendar/offer',{session_id:host.sid,offer_id:offer.id,request_id:task.id,accept:true},task.controller.signal);if(host.active!==task||host.epoch!==task.generation)return;if(r.error)throw Error(r.error);host.state('idle',task.id);host.renderAnswer(r.host.answer||'请核对预览');if(r.calendar_preview||r.calendar_draft)renderCalendarPreview(r.calendar_preview||r.calendar_draft);host.panelEvent('ready',task)}catch(e){if(host.active===task&&host.epoch===task.generation){host.state('idle',task.id);host.answer.textContent=host.safeMessage(e.message);host.panelEvent('error',task)}}finally{if(host.active===task){host.active=null;host.controls(false)}}
  };
 }
+function renderReminderBinding(target,result,previewId){
+ const at=host.epoch;let current=result.assistant_reminder||{status:'not_requested',message:'本次未设置助手提醒。'};
+ function paint(receipt){
+  current=receipt;target.replaceChildren();const p=document.createElement('p');p.textContent=receipt.status==='saved'?'助手提醒计划已保存'+(receipt.lead_minutes!=null?'：'+(receipt.lead_minutes===0?'开始时':('提前'+receipt.lead_minutes+'分钟')):'')+'。':receipt.message||'日程已保存；提醒尚未设置。';target.append(p);
+  const details=document.createElement('details'),summary=document.createElement('summary'),text=document.createElement('p');summary.textContent='日程详情 · 提醒';text.textContent=receipt.detail||(receipt.due?'提醒时间：'+new Date(receipt.due).toLocaleString():'日历和助手提醒分别保存。')+(receipt.status==='saved'?' 计划保存不等于系统通知已送达；需助手运行。':'');details.append(summary,text);target.append(details);
+  if(receipt.status==='needs_confirmation'){const changes=document.createElement('p');changes.textContent='原：'+receipt.original.title+' '+receipt.original.start+'；现：'+receipt.current.title+' '+receipt.current.start+'；提前'+receipt.lead_minutes+'分钟。仅设置提醒。';target.append(changes)}
+  if(receipt.status==='saved'||receipt.status==='not_requested'||receipt.retryable===false)return;
+  const button=document.createElement('button');button.type='button';const requestPermission=receipt.code==='permission'&&['authorization_required','authorization_pending'].includes(receipt.permission_status);button.textContent=receipt.status==='needs_confirmation'?'确认这项提醒':requestPermission?'继续日历授权':receipt.code==='permission'?'重新检查权限':'重新检查提醒';target.append(button);if(receipt.code==='permission'&&!requestPermission){const guide=document.createElement('p');guide.textContent=receipt.permission_status==='restricted'?'请检查系统管理限制，再重新检查。':'系统设置 → 隐私与安全性 → 日历 → 明日香小助手 → 完全访问。返回后重新检查；不保证再次弹出授权窗口。';target.append(guide)}
+  button.onclick=async()=>{if(host.active||host.epoch!==at||!target.isConnected)return;button.disabled=true;const task={id:crypto.randomUUID(),generation:at,controller:new AbortController()};host.active=task;host.controls(true);
+   try{const r=await host.post('/api/bubble/calendar/reminder/recheck',{session_id:host.sid,preview_id:previewId,request_id:task.id,action:receipt.status==='needs_confirmation'?'confirm':requestPermission?'authorize':'retry',recovery_id:receipt.recovery_id,explicit:true},task.controller.signal);if(host.active!==task||host.epoch!==at)return;window.dispatchEvent(new CustomEvent('calendar-reminder-receipt',{detail:{previewId,receipt:r.assistant_reminder}}));}
+   catch(e){if(host.epoch===at&&target.isConnected){p.textContent=host.safeMessage(e.message);button.disabled=false}}
+   finally{if(host.active===task){host.active=null;host.controls(false)}}
+  };
+ }
+ paint(current);const listener=e=>{if(!target.isConnected){window.removeEventListener('calendar-reminder-receipt',listener);return}if(host.epoch===at&&e.detail?.previewId===previewId)paint(e.detail.receipt)};window.addEventListener('calendar-reminder-receipt',listener);
+}
+async function renderPendingReminders(target){
+ const at=host.epoch;try{const r=await host.post('/api/bubble/calendar/reminder/status',{session_id:host.sid});if(!target.isConnected||at!==host.epoch)return;
+ for(const item of r.items||[]){const box=document.createElement('section'),title=document.createElement('p');title.textContent=item.title+' · '+new Date(item.start).toLocaleString()+' · 提前'+item.minutes+'分钟';box.append(title);const controls=document.createElement('div');box.append(controls);target.append(box);renderReminderBinding(controls,{assistant_reminder:item.assistant_reminder},item.preview_id)}}catch(e){if(target.isConnected){const p=document.createElement('p');p.textContent=host.safeMessage(e.message);target.append(p)}}
+}
 function renderCreated(r,p){
  const e=r.event;
  if(!e?.title||!e.start||!e.end||!e.timezone){host.answer.textContent='创建回执不完整，结果待核对；请勿重复创建。';return}
@@ -170,7 +190,7 @@ function renderCreated(r,p){
  line(role?variants[index]:'日程创建成功。');
  line(e.title);line(dates);
  for(const w of p.warnings||[])line(w);
- const rem=r.assistant_reminder;line(rem?.status==='saved'?'助手提醒：已保存，'+new Date(rem.due).toLocaleString('zh-CN',{timeZone:e.timezone}):rem?.message||'助手提醒：本次未设置。');
+ const binding=document.createElement('section');box.append(binding);renderReminderBinding(binding,r,p.id);
  const details=document.createElement('details'),summary=document.createElement('summary'),receipt=document.createElement('pre');summary.textContent='日程详情';receipt.style.whiteSpace='pre-wrap';receipt.textContent='时区：'+e.timezone+'\n开始：'+e.start+'\n结束：'+e.end+'\n事件身份：'+r.event_id+'\n读回核对：成功'+(r.message?'\n'+r.message:'');details.append(summary,receipt);box.append(details);host.answer.prepend(box);
 }
 function renderCalendarPreview(p,draft=null){
@@ -223,5 +243,5 @@ function renderCalendarPreview(p,draft=null){
  };
 }
 
-return {offerCalendarRecovery,renderCalendarRecovery,renderCalendarEvents,renderSelectedEdit,renderCalendarUpdateSelection,renderCalendarUpdatePreview,renderCalendarDeletePreview,renderCalendarOffer,renderCalendarPreview};
+return {renderPendingReminders,offerCalendarRecovery,renderCalendarRecovery,renderCalendarEvents,renderSelectedEdit,renderCalendarUpdateSelection,renderCalendarUpdatePreview,renderCalendarDeletePreview,renderCalendarOffer,renderCalendarPreview};
 };

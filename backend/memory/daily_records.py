@@ -5,7 +5,12 @@ import backend.memory.bubble_memory as store, backend.native_context as native_c
 FIELDS={'action','content','date_from','date_to','new_date','topic','target','resume','use_selected','summarize','self_report','evidence'}
 SCHEMA={'type':['object','null'],'properties':{k:({'type':'string','enum':['save','query','update','forget','clarify','none']} if k=='action' else {'type':'boolean'} if k in ('resume','use_selected','summarize','self_report') else {'type':['string','null'],'maxLength':300}) for k in FIELDS},'required':sorted(FIELDS),'additionalProperties':False}
 SCHEMA['properties']['date_basis']={'type':['string','null'],'enum':['occurred','recorded',None]}
-PROMPT=' DAILY_RECORD_V1: journal=own explicit daily records, not preferences/calendar. Code executes. No success claims.'
+PROMPT=(' DAILY_RECORD_V1: journal operates on explicitly requested saved daily records, not preferences/calendar. '
+'Reporting an experience is not requesting storage: completed progress, personal facts, plans and corrections to this conversation stay chat unless the user requests a saved-record operation. '
+'This intent distinction is identical in every language; self_report proves attribution, NOT permission to save. '
+'Only a CURRENT explicit request to save/query/correct/forget a record selects journal; quoted, hypothetical or third-person requests are not authority. '
+'Use CURRENT exact original clauses for all record fields; never translate/paraphrase evidence or content. '
+'Continued record criteria are code-kept; do not resume them merely because chat shares a topic. Code executes. No success claims.')
 def wire_schema():
  # Compact documentation; SCHEMA remains the full validation boundary.
  return ('null or {action:save|query|update|forget|clarify|none, '
@@ -113,7 +118,7 @@ def blank(**kw):return dict(action='query',content=None,date_from=None,date_to=N
 def api(c,body):
  from backend.memory.assistant_memory import MemoryAccess
  action=body['action']
- if action=='record_cloud_config':__import__('backend.memory.style_preferences', fromlist=['*']).configure(body.get('enabled'),body.get('policy_revision'),'record_cloud');return MemoryAccess.list_for(c)
+ if action=='record_cloud_config':__import__('backend.memory.style_preferences', fromlist=['*']).configure(body.get('enabled'),body.get('policy_revision'),'record_cloud');__import__('backend.memory.periodic_distillation',fromlist=['*']).invalidate_sources();return MemoryAccess.list_for(c)
  selected=None;revision=body.get('revision')
  if action=='record_choose':
   pending=getattr(c,'record_pending',None);token=body.get('token')

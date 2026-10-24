@@ -95,6 +95,7 @@ def _read():
  if guard and state['revision']!=guard['revision']:raise ValueError('记忆版本与保护记录不一致。')
  return state,raw if guard is None else None
 def _public(state):
+ if 'distillation' in state['learning']:__import__('backend.memory.periodic_distillation',fromlist=['*']).refresh(state,state['learning']['distillation'])
  return {'revision':state['revision'],'learning':__import__('backend.memory.memory_learning', fromlist=['*']).public(state['learning']),'items':[dict(r) for r in state['items'] if active(r)],'inactive':[dict(r,effective_status='inactive' if r['status']=='inactive' else 'expired') for r in state['items'] if not active(r)]}
 def _finish(raw,guard):
  _atomic(PATH,raw);_atomic(_side('guard'),_encode(guard));_atomic(_side('checkpoint'),raw);_side('pending').unlink(missing_ok=True);_fsync_directory()
@@ -173,6 +174,7 @@ def mutate(action,*,text=None,id=None,revision=None,scopes=None,cloud_allowed=No
    row=next((r for r in items if r['id']==id),None)
    if row is None:raise ValueError('该记忆已不存在，请刷新列表。')
    if action=='delete':
+    __import__('backend.memory.periodic_distillation',fromlist=['*']).forgotten(state,row)
     __import__('backend.memory.memory_learning', fromlist=['*']).suppress(state,row.get('preference_key'),row.get('scenario','general'))
     items.remove(row);message='已忘记这条长期记忆，后续召回不再使用；历史聊天和私人备份不会同时删除。'
    else:
@@ -189,6 +191,7 @@ def mutate(action,*,text=None,id=None,revision=None,scopes=None,cloud_allowed=No
      if value!=row['text']:row.pop('preference_key',None);row.pop('preference_value',None)
     elif value!=row['text']:row.pop('preference_key',None);row.pop('preference_value',None)
     explicit_change=value!=row['text'] or (kind is not None and kind!=row['kind'])
+    if row.get('distillation_id') and explicit_change:row['previous_distillation_id']=row.pop('distillation_id')
     if row.get('learning_id') and explicit_change:
      for c in state['learning']['candidates']:
       if c['id']==row['learning_id']:c['status']='superseded';c['reason']='用户明确修改优先，原推断已被替代'
@@ -205,6 +208,8 @@ def mutate(action,*,text=None,id=None,revision=None,scopes=None,cloud_allowed=No
    changed=True
   elif action=='clear':
    for r in items:
+    if ids is None or r['id'] in ids:__import__('backend.memory.periodic_distillation',fromlist=['*']).forgotten(state,r)
+   for r in items:
     if ids is None or r['id'] in ids:__import__('backend.memory.memory_learning', fromlist=['*']).suppress(state,r.get('preference_key'),r.get('scenario','general'))
    for c in list(state['learning']['candidates']):__import__('backend.memory.memory_learning', fromlist=['*']).suppress(state,c['key'],c['scenario'])
    keep=[] if ids is None else [r for r in items if r['id'] not in ids]
@@ -220,7 +225,9 @@ def mutate(action,*,text=None,id=None,revision=None,scopes=None,cloud_allowed=No
    if record_policy and affected.get('journal') and not affected.get('record_cloud_denied'):
     policy=__import__('backend.memory.daily_records', fromlist=['*']).policy()
     if policy['enabled']:affected['record_cloud_policy']=policy['id']
-  if changed:state['revision']+=1;_write(state,legacy)
+  if changed:
+   if 'distillation' in state['learning']:__import__('backend.memory.periodic_distillation',fromlist=['*']).refresh(state,state['learning']['distillation'])
+   state['revision']+=1;_write(state,legacy)
   return dict(_public(state),message=message)
 def save(items,revision=None):
  # No current caller needs blind replacement. Fail closed rather than silently bypass CAS.

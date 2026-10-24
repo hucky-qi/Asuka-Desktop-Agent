@@ -207,6 +207,13 @@ def refresh(body,c,sid):
         save(p);return {'status':'preview','calendar_preview':public(p)}
 
 
+def reminder_receipt(receipt):
+    # Old read-only eligibility rejection is not an eternal failure or a new grant.
+    import copy
+    r=copy.deepcopy(receipt)
+    if r.get('status')=='not_set' and r.get('code')=='calendar_unverified':r.update(message='日程已保存；提醒尚未设置。',detail='本机提醒现已与日历写权限分离。可重新检查原事件；不会创建副本或自动启用提醒。',code='recheck',retryable=True)
+    return r
+
 def finish_reminder(data,body,c,task):
     """A separate durable receipt, only after verified calendar create/readback."""
     import copy
@@ -215,23 +222,93 @@ def finish_reminder(data,body,c,task):
         p=load(body.get('preview_id'),task.sid);choice=p.get('confirmed_reminder',{'enabled':False,'minutes':None})
         if not choice['enabled']:return dict(data,assistant_reminder={'status':'not_requested','message':'本次未设置助手提醒。'})
         previous=p.get('reminder_commit')
-        if previous and previous['status'] not in ('saving','unknown'):return dict(data,assistant_reminder=copy.deepcopy(previous))
+        if previous and previous['status'] not in ('saving','unknown'):return dict(data,assistant_reminder=reminder_receipt(previous))
         if previous:
             with reminders.store() as state:
                 op=state['operations'].get(p['id']);saved=state['items'].get((op or {}).get('id'))
-            receipt={'status':'saved','due':saved['due'],'message':'助手提醒已保存。'} if saved else {'status':'unknown','message':'日历已创建；提醒保存结果待核对，不会盲目重试。'}
+            receipt={'status':'saved','due':saved['due'],'lead_minutes':saved['lead_minutes'],'message':'助手提醒计划已保存。'} if saved else {'status':'unknown','message':'日历已创建；提醒保存结果待核对，不会盲目重试。'}
             p['reminder_commit']=receipt;save(p);return dict(data,assistant_reminder=receipt)
         p['reminder_commit']={'status':'saving','message':'提醒保存结果待核对。'};save(p)
     try:
-        task.check();reminder_choice(choice,p)
-        if not reminders.enabled():raise ValueError('助手提醒开关关闭；日历已创建，提醒尚未设置。请从设置开启后为该事件设置。')
+        task.check();binding_choice(choice,p)
+        if not reminders.enabled():raise reminders.ReminderEligibilityError('switch_off','助手提醒总开关关闭，请从现有设置开启；日历已保存，不会自动开启。',retryable=True)
         fresh=reminders.read_event(data['event_id'],p['calendar_id'],task.cancel)
         if not fresh or any(fresh[k]!=p[k] for k in ('title','start','end')):raise ValueError('事件已变化或不存在；日历创建回执保留，提醒尚未设置。')
-        task.check();reminder_choice(choice,p)
+        task.check();binding_choice(choice,p)
+        with LOCK:
+            p=load(p['id'],task.sid);p['reminder_event_version']=fresh['version'];save(p)
         row=reminders.set_plan(fresh,choice['minutes'],task.check,p['id'])
-        receipt={'status':'saved','due':row['due'],'lead_minutes':row['lead_minutes'],'message':'助手提醒已保存。'}
-    except ValueError as error:receipt={'status':'not_set','message':__import__('backend.assistant.bubble_chat',fromlist=['*']).user_error(error)['error']}
+        receipt={'status':'saved','due':row['due'],'lead_minutes':row['lead_minutes'],'message':'助手提醒计划已保存；将在到点时尝试投递。'}
+    except ValueError as error:
+        safe=__import__('backend.assistant.bubble_chat',fromlist=['*']).user_error(error)['error'];code=getattr(error,'code',None) or ('permission' if getattr(error,'status',None) in ('denied','revoked','restricted','authorization_required','authorization_pending','write_only') else 'recheck')
+        receipt={'status':'not_set','message':'日程已保存；提醒尚未设置。','detail':safe,'code':code,'permission_status':getattr(error,'status',None),'retryable':getattr(error,'retryable',True)}
+        if getattr(error,'event_version',None):
+            with LOCK:p=load(p['id'],task.sid);p['reminder_event_version']=error.event_version;save(p)
     except Exception:receipt={'status':'unknown','message':'日历已创建；提醒保存结果待核对，不会盲目重试。'}
     with LOCK:
         p=load(p['id'],task.sid);p['reminder_commit']=receipt;save(p)
     return dict(data,assistant_reminder=receipt)
+
+
+def reminder_recovery(body,c,sid,task):
+    """Read/retry only the verified original identity; never invokes calendar create."""
+    import copy,uuid
+    import backend.calendar.calendar_reminders as reminders
+    action=body.get('action','retry')
+    if action not in ('status','retry','confirm','authorize'):raise ValueError('提醒恢复操作不支持。')
+    if action=='status':
+        rows=[]
+        for f in sorted(ROOT.glob('*.json'),key=lambda f:f.stat().st_mtime,reverse=True)[:128]:
+            p=json.loads(f.read_text())
+            if p.get('session_id')==sid and p.get('state')=='verified' and p.get('confirmed_reminder',{}).get('enabled') and (p.get('reminder_commit') or {}).get('status')!='saved':rows.append({'preview_id':p['id'],'title':p['title'],'start':p['start'],'minutes':p['confirmed_reminder']['minutes'],'assistant_reminder':reminder_receipt(p.get('reminder_commit') or {'status':'not_set','message':'日程已保存；提醒尚未设置。','retryable':True})})
+            if len(rows)==5:break
+        return {'items':rows}
+    if body.get('explicit') is not True:raise ValueError('请主动点击重新检查或确认设置提醒。')
+    with LOCK:
+        p=load(body.get('preview_id'),sid)
+        if p['state']!='verified' or not p.get('result',{}).get('event_id') or not p.get('confirmed_reminder',{}).get('enabled'):raise ValueError('没有已核验创建且明确要求提醒的原操作；不会创建新日程。')
+        result=copy.deepcopy(p['result']);choice=copy.deepcopy(p['confirmed_reminder']);prior=p.get('reminder_commit') or {}
+    def done(receipt):
+        with LOCK:
+            task.check();current=load(p['id'],sid);current['reminder_commit']=receipt;save(current)
+        return dict(result,preview_id=p['id'],assistant_reminder=receipt)
+    if prior.get('status') in ('saved','saving','unknown'):
+        if prior['status']=='saved':return dict(result,preview_id=p['id'],assistant_reminder=prior)
+        # Existing durable operation record is the only success evidence.
+        with reminders.store() as d:
+            op=d['operations'].get(p['id']);row=d['items'].get((op or {}).get('id'))
+        if row:return done({'status':'saved','due':row['due'],'lead_minutes':row['lead_minutes'],'message':'助手提醒计划已保存。'})
+        return done({'status':'unknown','message':'日程已保存；提醒保存结果待核对。','detail':'没有可靠的成功回执，不会盲目重做。','retryable':False})
+    try:
+        task.check()
+        if action=='authorize':
+            # Reuse the existing user-triggered permission/catalog path, read-only.
+            permission=bridge({'action':'permission_authorize','explicit_user_action':True},task.cancel);
+            if permission.get('status') not in ('allowed','ok'):require_ok(permission)
+        if not reminders.enabled():return done({'status':'not_set','message':'日程已保存；提醒尚未设置。','detail':'助手提醒总开关关闭，请从本机日程提醒设置启用后返回；不会自动开启。','code':'switch_off','retryable':True})
+        fresh=reminders.read_event(result['event_id'],p['calendar_id'],task.cancel)
+        if not fresh:return done({'status':'not_set','message':'日程已保存；原事件已不可读取，提醒未设置。','detail':'原事件可能已删除或移动，请重新查询并选择具体事件；不按标题绑定其他事件。','code':'not_found','retryable':False})
+        target=dict(p,start=fresh['start'],all_day=False);binding_choice(choice,target);task.check()
+        changed=any(p[k]!=fresh[k] for k in ('title','start','end')) or p.get('reminder_event_version')!=fresh['version'] or p['epoch']!=c.epoch
+        if action=='confirm':
+            proof=p.get('reminder_recovery') or {}
+            if proof.get('id')!=body.get('recovery_id') or proof.get('epoch')!=c.epoch or proof.get('event_version')!=fresh['version'] or proof.get('choice')!=choice or dt.datetime.fromisoformat(proof.get('expires','1970-01-01T00:00:00+00:00'))<dt.datetime.fromisoformat(native_context.system_clock()['now']):raise ValueError('提醒恢复预览已变化或过期，请重新检查；没有保存。')
+        elif changed:
+            proof={'id':uuid.uuid4().hex,'epoch':c.epoch,'event_version':fresh['version'],'choice':choice,'expires':(dt.datetime.fromisoformat(native_context.system_clock()['now'])+dt.timedelta(minutes=5)).isoformat()}
+            with LOCK:task.check();current=load(p['id'],sid);current['reminder_recovery']=proof;save(current)
+            return dict(result,preview_id=p['id'],assistant_reminder={'status':'needs_confirmation','message':'日程已保存；请核对这项提醒。','detail':'原确认或事件版本已变化，仅确认提醒，不会再次创建日历。','recovery_id':proof['id'],'original':{k:p[k] for k in ('title','start','end')},'current':{k:fresh[k] for k in ('title','start','end')},'lead_minutes':choice['minutes'],'retryable':True})
+        # Same event/parameters under a still-valid confirmation, or explicit new proof.
+        with LOCK:
+            task.check();current=load(p['id'],sid);current['reminder_commit']={'status':'saving'};save(current)
+        row=reminders.set_plan(fresh,choice['minutes'],task.check,p['id'])
+        return done({'status':'saved','message':'助手提醒已保存。','due':row['due'],'lead_minutes':row['lead_minutes']})
+    except ValueError as error:
+        task.check();code=getattr(error,'code',None) or ('permission' if getattr(error,'status',None) in ('denied','revoked','restricted','authorization_required','authorization_pending','write_only') else 'recheck')
+        receipt={'status':'not_set','message':'日程已保存；提醒尚未设置。','detail':__import__('backend.assistant.bubble_chat',fromlist=['*']).user_error(error)['error'],'code':code,'permission_status':getattr(error,'status',None),'retryable':getattr(error,'retryable',True)}
+        return done(receipt)
+
+def binding_choice(choice,p):
+    try:return reminder_choice(choice,p)
+    except ValueError as error:
+        from backend.calendar.calendar_reminders import ReminderEligibilityError
+        raise ReminderEligibilityError('expired_or_invalid',str(error),retryable=False) from None

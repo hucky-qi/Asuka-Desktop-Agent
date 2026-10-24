@@ -67,3 +67,11 @@ acceptance/release-blockers/
 tests/**/baseline-*/
 tests/**/offline-*/
 tests/safety/real-budget*
+
+# Local conversations, evidence and prototype credentials are never release content
+acceptance/
+*.jsonl
+*.pcm
+*.ogg
+*.mp3
+*.backup

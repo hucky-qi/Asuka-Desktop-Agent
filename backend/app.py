@@ -260,8 +260,16 @@ def index_status():
 
 def automatic_index_loop():
     """The user explicitly enables this policy; no Ollama calls at startup by default."""
+    next_index = time.monotonic() + settings.AUTO_INDEX_INTERVAL
     while True:
-        time.sleep(settings.AUTO_INDEX_INTERVAL)
+        time.sleep(min(30, settings.AUTO_INDEX_INTERVAL))
+        try:
+            __import__('backend.memory.periodic_distillation', fromlist=['*']).tick()
+        except (OSError, ValueError):
+            pass  # Existing memory API exposes recovery; never clear corrupt state.
+        if time.monotonic() < next_index:
+            continue
+        next_index = time.monotonic() + settings.AUTO_INDEX_INTERVAL
         if preferences.load()["auto_index"]:
             try:
                 start_index("all")
@@ -825,7 +833,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path=="/reminder-notifications":
             raw=(settings.FRONTEND/"reminder-notifications.html").read_bytes();self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Cache-Control","no-store");self.send_header("Referrer-Policy","no-referrer");self.send_header("Content-Security-Policy","default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'");self.send_header("Content-Length",str(len(raw)));self.end_headers();self.wfile.write(raw);return
-        if self.path in ("/speech-view.js","/persona-view.js","/shared-reminder.js","/daily-settings.js","/unified-web.js","/calendar-view.js","/file-qa-view.js", "/memory-view.js"):
+        if self.path in ("/settings-view.js","/speech-view.js","/persona-view.js","/shared-reminder.js","/daily-settings.js","/unified-web.js","/calendar-view.js","/file-qa-view.js", "/memory-view.js"):
             raw=(settings.FRONTEND/self.path[1:]).read_bytes();self.send_response(200);self.send_header("Content-Type","application/javascript; charset=utf-8");self.send_header("Cache-Control","no-store");self.send_header("Content-Length",str(len(raw)));self.end_headers();self.wfile.write(raw);return
         if self.path == "/input-guard.js":
             raw=(settings.FRONTEND/"input-guard.js").read_bytes()
@@ -921,7 +929,7 @@ class Handler(BaseHTTPRequestHandler):
                              "/api/saved-search", "/api/preview", "/api/related", "/api/duplicates",
                              "/api/duplicates/cancel", "/api/duplicates/plan", "/api/duplicates/confirm",
                              "/api/chat/cancel", "/api/chat/clear", "/api/index/cancel",
-                             "/api/bubble/calendar/delete/preview", "/api/bubble/calendar/delete/confirm", "/api/bubble/calendar/delete/cancel", "/api/bubble/calendar/update/choose", "/api/bubble/calendar/update/deselect", "/api/bubble/calendar/update/select", "/api/bubble/calendar/update/confirm", "/api/bubble/calendar/update/cancel", "/api/bubble/calendar/offer", "/api/bubble/calendar/more", "/api/bubble/calendar/refresh", "/api/bubble/calendar/confirm", "/api/bubble/calendar/cancel", "/api/bubble/calendar/revise", "/api/bubble/session", "/api/bubble/chat", "/api/bubble/cancel", "/api/bubble/reset", "/api/files/search", "/api/files/current", "/api/bubble/files/select", "/api/bubble/files/qa", "/api/bubble/files/handoff", "/api/bubble/memory", "/api/bubble/model", "/api/bubble/model/compare"):
+                             "/api/bubble/calendar/delete/preview", "/api/bubble/calendar/delete/confirm", "/api/bubble/calendar/delete/cancel", "/api/bubble/calendar/update/choose", "/api/bubble/calendar/update/deselect", "/api/bubble/calendar/update/select", "/api/bubble/calendar/update/confirm", "/api/bubble/calendar/update/cancel", "/api/bubble/calendar/offer", "/api/bubble/calendar/more", "/api/bubble/calendar/refresh", "/api/bubble/calendar/confirm", "/api/bubble/calendar/cancel", "/api/bubble/calendar/revise", "/api/bubble/calendar/reminder/recheck", "/api/bubble/calendar/reminder/status", "/api/bubble/session", "/api/bubble/chat", "/api/bubble/cancel", "/api/bubble/reset", "/api/files/search", "/api/files/current", "/api/bubble/files/select", "/api/bubble/files/qa", "/api/bubble/files/handoff", "/api/bubble/memory", "/api/bubble/model", "/api/bubble/model/compare"):
             self.send_error(404)
             return
         if self.headers.get("Host") != f"{settings.HOST}:{settings.PORT}":
@@ -954,7 +962,7 @@ class Handler(BaseHTTPRequestHandler):
                 state=SESSIONS[key]
                 with state.lock:event=search_snapshot(state,{'tool':'find_files','results':visible(state),'total':len(state.current_filtered_results),**state.search_coverage},fresh=False)
                 self.send_json(200,{'event':event,'answer':listing_reply(event)});return
-            if self.path in ('/api/bubble/calendar/delete/preview','/api/bubble/calendar/delete/confirm','/api/bubble/calendar/delete/cancel','/api/bubble/calendar/update/choose','/api/bubble/calendar/update/deselect','/api/bubble/calendar/update/select','/api/bubble/calendar/update/confirm','/api/bubble/calendar/update/cancel','/api/bubble/session','/api/bubble/chat','/api/bubble/cancel','/api/bubble/reset','/api/bubble/calendar/offer','/api/bubble/calendar/more','/api/bubble/calendar/refresh','/api/bubble/calendar/confirm','/api/bubble/calendar/cancel','/api/bubble/calendar/revise'):
+            if self.path in ('/api/bubble/calendar/delete/preview','/api/bubble/calendar/delete/confirm','/api/bubble/calendar/delete/cancel','/api/bubble/calendar/update/choose','/api/bubble/calendar/update/deselect','/api/bubble/calendar/update/select','/api/bubble/calendar/update/confirm','/api/bubble/calendar/update/cancel','/api/bubble/session','/api/bubble/chat','/api/bubble/cancel','/api/bubble/reset','/api/bubble/calendar/offer','/api/bubble/calendar/more','/api/bubble/calendar/refresh','/api/bubble/calendar/confirm','/api/bubble/calendar/cancel','/api/bubble/calendar/revise','/api/bubble/calendar/reminder/recheck','/api/bubble/calendar/reminder/status'):
                 bubble_chat.handle(self,body)
                 return
             if self.path == "/api/files/search":

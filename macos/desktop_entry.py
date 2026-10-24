@@ -14,7 +14,7 @@ def pet_running():
         return False
 
 def record(status,**values):
-    payload={'status':status,'at':time.time(),**values}
+    payload={'status':status,'at':time.time(),'entry_pid':os.getpid(),**values}
     temporary=STATE.with_suffix('.tmp');temporary.write_text(json.dumps(payload,ensure_ascii=False));os.chmod(temporary,0o600);temporary.replace(STATE)
 
 def launch(timeout=210):

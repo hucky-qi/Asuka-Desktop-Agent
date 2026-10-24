@@ -1,5 +1,7 @@
 """Explicit local provider plus disabled cloud adapter. No discovery or auto-routing."""
 import json
+import hashlib
+from http.client import IncompleteRead
 import os
 from types import SimpleNamespace
 from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler, HTTPSHandler
@@ -9,6 +11,17 @@ import ssl,certifi
 class NoCloudRedirect(HTTPRedirectHandler):
     def redirect_request(self,*args,**kwargs):raise RuntimeError("云端重定向被阻止，未自动重试")
 class CloudError(ValueError):pass
+
+def json_document(content):
+    # Ambiguous duplicate names and non-JSON numeric constants are never silently accepted.
+    def pairs(items):
+        obj={}
+        for name,value in items:
+            if name in obj:raise ValueError('duplicate JSON field')
+            obj[name]=value
+        return obj
+    def constant(value):raise ValueError('non-JSON numeric constant')
+    return json.loads(content,object_pairs_hook=pairs,parse_constant=constant)
 
 def safe_cloud_diagnostic(message,key):
     import re
@@ -33,15 +46,18 @@ class OllamaProvider:
         import backend.providers.model_dispatch as model_dispatch
         return model_dispatch.submit(self.client,kwargs,cancel,dispatch_phase,execution_budget)
 
-def schema_instruction(schema,compact=False):
-    return ('JSON only. Schema: ' if compact else 'Return a JSON object only. Application validates the JSON schema. Schema: ')+json.dumps(schema,ensure_ascii=False,separators=(',',':'))
+def schema_instruction(schema,compact=False,example=None):
+    instruction=('JSON only. Output contract: ' if compact else 'Return a JSON object only. Application validates the JSON schema. Schema: ')+json.dumps(schema,ensure_ascii=False,separators=(',',':'))
+    if example is None:instruction+=' Use valid JSON string escaping for quotes, backslashes and newlines; no prose outside the object.'
+    else:instruction+=' Syntax only, choose the current intent. EXAMPLE JSON OUTPUT: '+json.dumps(example,ensure_ascii=False,separators=(',',':'))
+    return instruction
 
 class DeepSeekProvider:
     memory_destination = "cloud"
     def __init__(self, *, enabled=False, api_key=None, base_url='https://api.deepseek.com', model='deepseek-flash', transport=None, timeout=30):
         self.enabled=enabled;self.api_key=api_key;self.base_url=base_url.rstrip('/');self.model=model
         self.transport=transport or build_opener(NoCloudRedirect(),HTTPSHandler(context=ssl.create_default_context(cafile=certifi.where()))).open;self.timeout=timeout
-    def chat(self, *, messages, tools=None, stream=False, cancel=None, permit=None, request_id=None, max_tokens=512, format=None, schema_hint=None, **unused):
+    def chat(self, *, messages, tools=None, stream=False, cancel=None, permit=None, request_id=None, max_tokens=512, format=None, schema_hint=None, schema_example=None, **unused):
         if not self.enabled:raise CloudError('DeepSeek出站未启用；未发送请求')
         if not self.api_key:raise CloudError('DeepSeek未配置凭据；未发送请求')
         from backend.providers.cloud_access import Permit
@@ -52,31 +68,63 @@ class DeepSeekProvider:
         if tools:payload['tools']=[convert_function_to_tool(t).model_dump(exclude_none=True) if callable(t) else t for t in tools]
         if format:
             payload['response_format']={'type':'json_object'}
-            payload['messages']=[{'role':'system','content':schema_instruction(schema_hint if schema_hint is not None else format,compact=schema_hint is not None)}]+payload['messages']
+            payload['messages']=[{'role':'system','content':schema_instruction(schema_hint if schema_hint is not None else format,compact=schema_hint is not None,example=schema_example)}]+payload['messages']
         # Ordinary desktop answers are returned as a complete result. Streaming conversion
         # remains reserved; never starts an unguarded generator or performs hidden retries.
         if stream:raise CloudError('云端流式入口本轮未开放；请使用完整回答接口')
         permit.reserve(payload,self.base_url,self.api_key)
         cancelled(cancel)
         request=Request(self.base_url+'/chat/completions',data=json.dumps(payload,ensure_ascii=False).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+self.api_key})
+        invalid_recorded=False
         try:
             permit.record('sent')
             with self.transport(request,timeout=self.timeout) as response:
                 http_status=response.status
                 response_request_id=response.headers.get('x-request-id') or response.headers.get('request-id')
-                data=json.load(response)
-            permit.record('response_received',data.get('usage'))
+                response_headers=getattr(response,'headers',{})
+                try:
+                    raw=response.read()
+                    if isinstance(raw,str):raw=raw.encode('utf-8')
+                    response_meta={'http_status':http_status,'body_bytes':len(raw),'body_sha256':hashlib.sha256(raw).hexdigest(),'request_id':safe_cloud_diagnostic(response_request_id,self.api_key) if response_request_id else None}
+                    length=response_headers.get('Content-Length')
+                    if length and str(length).isdigit():response_meta['declared_body_bytes']=int(length)
+                    data=json_document(raw)
+                    if not isinstance(data,dict):raise ValueError('response envelope is not an object')
+                except IncompleteRead as error:
+                    invalid_recorded=True
+                    permit.record('failed',diagnostic={'stage':'transport','code':'incomplete_transfer','http_status':http_status,'received_bytes':len(error.partial)})
+                    raise CloudError('服务响应未接收完整；本次未完成、结果待核对，未自动重试') from None
+                except (ValueError,TypeError,UnicodeError):
+                    invalid_recorded=True
+                    permit.record('failed',diagnostic={'stage':'response_envelope','code':'invalid_envelope','http_status':http_status,'body_bytes':len(raw)})
+                    raise CloudError('服务响应格式无法读取；本次未完成、结果待核对，未自动重试') from None
+            permit.record('response_received',data.get('usage'),dict(response_meta,stage='response_received'))
             cancelled(cancel)
             permit.check_memory_refs()
             choice=data['choices'][0]
             if choice.get('finish_reason') not in ('stop','tool_calls'):
-                permit.record('truncated',data.get('usage'),{'finish_reason':choice.get('finish_reason')})
-                raise CloudError('云端输出达到长度上限或未完整结束；未自动重试，不能视为完整回答')
+                invalid_recorded=True
+                reason=choice.get('finish_reason')
+                permit.record('truncated' if reason=='length' else 'invalid_response',data.get('usage'),{'stage':'model_finish','code':'output_limit' if reason=='length' else 'incomplete_generation','finish_reason':reason})
+                raise CloudError('回答达到长度上限，尚未完整结束；未自动续写' if reason=='length' else '服务未完整生成回答；本次未完成，未自动重试')
+            if not isinstance(choice.get('message'),dict) or (choice['message'].get('content') is not None and not isinstance(choice['message']['content'],str)):
+                invalid_recorded=True
+                permit.record('failed',diagnostic={'stage':'response_envelope','code':'invalid_envelope','http_status':http_status,'request_id':response_meta['request_id']})
+                raise CloudError('服务响应字段无法读取；本次未完成、结果待核对，未自动重试')
             message=self.response_message(choice['message'])
             if message.tool_calls:raise CloudError('本次普通聊天不执行云端建议的工具操作')
             if format:
                 import jsonschema
-                obj=json.loads(message.content);jsonschema.validate(obj,format)
+                try:obj=json_document(message.content)
+                except (ValueError,TypeError):
+                    invalid_recorded=True
+                    permit.record('invalid_response',data.get('usage'),{'stage':'model_json','code':'invalid_json','http_status':http_status,'request_id':response_meta['request_id'],'content_bytes':len(message.content.encode('utf-8')),'content_sha256':hashlib.sha256(message.content.encode('utf-8')).hexdigest()})
+                    raise CloudError('DeepSeek返回的JSON不合法；本次未完成、未执行，未自动重试') from None
+                try:jsonschema.validate(obj,format)
+                except jsonschema.ValidationError:
+                    invalid_recorded=True
+                    permit.record('invalid_response',data.get('usage'),{'stage':'model_schema','code':'invalid_schema','http_status':http_status,'request_id':response_meta['request_id']})
+                    raise CloudError('DeepSeek返回的字段不符合契约；本次未完成、未执行，未自动重试') from None
             usage={k:v for k,v in (data.get('usage') or {}).items() if k in ('prompt_tokens','completion_tokens','total_tokens','prompt_cache_hit_tokens','prompt_cache_miss_tokens') and type(v) is int and v>=0};permit.record('completed',usage,{'http_status':http_status,'request_id':safe_cloud_diagnostic(response_request_id,self.api_key) if response_request_id else None,'response_id':safe_cloud_diagnostic(data.get('id',''),self.api_key),'response_model':safe_cloud_diagnostic(data.get('model',self.model),self.api_key)})
             return SimpleNamespace(message=message,usage=usage,provider='deepseek',model=data.get('model',self.model),request_id=request_id,response_id=data.get('id'))
         except HTTPError as error:
@@ -93,7 +141,8 @@ class DeepSeekProvider:
         except ProviderCancelled:
             permit.record('cancelled');raise
         except CloudError:
-            permit.record('invalid_response');raise
+            if not invalid_recorded:permit.record('invalid_response')
+            raise
         except Exception as error:
             permit.record('failed',diagnostic={'stage':'connect_or_parse','http_status':None,'request_id':None,'error_type':type(error).__name__,'message':safe_cloud_diagnostic(error,self.api_key)});raise CloudError('DeepSeek连接或响应格式错误；未自动重试') from None
     @staticmethod

@@ -48,6 +48,10 @@ if __name__=='__main__':
       assert 'Native blue fallback ready' in (Path(folder)/'server.log').read_text(),'No native fallback readiness marker'
       native_result='native_window_ready_without_model; mouse interaction not automated'
      finally:native.terminate();native.wait(timeout=5)
+    sid=json.loads(get(base,'/api/bubble/session',{}))['session_id']
+    import uuid
+    result=bb.request(base,'/api/bubble/chat',{'session_id':sid,'request_id':uuid.uuid4().hex,'question':'用一句话解释API。','web_enabled':False})
+    assert result.get('http_error') in (400,403) and any(word in result.get('body','') for word in ('DeepSeek','未配置','未启用')),'Missing configuration must be explicit before outbound'
     assert Trap.count==0,'Unexpected outbound dependency request'
     print(json.dumps({'no_key_local_startup':'PASS','web_and_bubble_pages':'PASS','fixture_filename_search':'PASS','model_web_dependency_calls':Trap.count,'native_fallback':native_result}))
    finally:child.terminate();child.wait(timeout=8)

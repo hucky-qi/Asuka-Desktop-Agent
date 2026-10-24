@@ -27,6 +27,7 @@ def session_now():return time.monotonic()
 
 @dataclass
 class Conversation:
+    chat_source_segment: str = field(default_factory=lambda: uuid.uuid4().hex)
     explicit_styles: dict = field(default_factory=dict)
     persona_enabled: bool = True
     persona_tone: str = "default"
@@ -104,7 +105,7 @@ def stop(session_id, request_id=None, reset=False):
             if c.cancel:c.cancel.set()
             c.epoch+=1;c.request=None;c.cancel=None;c.active_domain=None;c.touched=session_now()
             if reset:
-                c.persona_tone='default';c.explicit_styles={};c.record_pending=None;c.record_context={};c.record_selected=None
+                c.chat_source_segment=uuid.uuid4().hex;c.persona_tone='default';c.explicit_styles={};c.record_pending=None;c.record_context={};c.record_selected=None
                 __import__('backend.assistant.session_lifecycle', fromlist=['*']).forget(sid)
                 __import__('backend.providers.cloud_access', fromlist=['*']).reset(c)
                 SessionContext(c).clear_dialogue();c.file_context=None;c.task_view=None;c.last_domain="chat";c.submitted=False;c.calendar_context=None;c.calendar_references=[]
@@ -140,7 +141,7 @@ def prepare(body, received_clock=None):
         c.task_token=task_status.begin(rid,"bubble")
         c.epoch+=1;c.request=rid;c.active_domain=None;c.cancel=threading.Event();c.touched=session_now();c.submitted=True
         if edit_id is not None and c.calendar_snapshot:c.calendar_snapshot['epoch']=c.epoch
-        return sid,c,c.epoch,rid,c.cancel,text.strip(),list(c.history),body.get('web_enabled') is True,c.task_token,{"received_clock":dict(received_clock),"scope":body.get("scope","all"),"snapshot_id":body.get("file_snapshot_id"),"qa_continue":body.get("qa_continue"),"web_new_search":body.get("web_new_search") is True}
+        return sid,c,c.epoch,rid,c.cancel,text.strip(),list(c.history),body.get('web_enabled') is True,c.task_token,{"received_clock":dict(received_clock),"scope":body.get("scope","all"),"snapshot_id":body.get("file_snapshot_id"),"qa_continue":body.get("qa_continue"),"web_new_search":body.get("web_new_search") is True,"_source_consent":__import__('backend.memory.chat_sources',fromlist=['*']).begin(c,rid)}
 
 def generate(job, emit, provider=None, calendar_intent=None):
     import backend.providers.model_dispatch as model_dispatch
@@ -153,8 +154,29 @@ def generate(job, emit, provider=None, calendar_intent=None):
                 if item.get('type')=='stage':c.task_view={'session_id':job[0],'request_id':job[3],'version':job[2],'state':'queued' if phase=='queued' else 'executing'}
                 elif item.get('type')=='error':c.task_view={'session_id':job[0],'request_id':job[3],'version':job[2],'state':'failed'}
         emit(item)
-    with model_dispatch.context(job[3],job[8],job[4],task_emit):
-        return _generate(job,task_emit,provider,calendar_intent)
+    captured={'answer':'','status':'incomplete','terminal':False}
+    original=task_emit
+    def tracked(item):
+        if item.get('type')=='delta':captured['answer']+=item.get('text','')
+        if item.get('type')=='done':captured.update(answer=item.get('answer',captured['answer']),status='cancelled' if item.get('cancelled') else 'completed',terminal=True)
+        if item.get('type')=='error':captured.update(status='failed',terminal=True)
+        options=job[9] if len(job)>9 else {}
+        if item.get('type')=='done' and not item.get('cancelled') and ((item.get('assistant_result') or {}).get('kind')!='text' or any(k in item for k in ('calendar_preview','calendar_draft','calendar_events','memory_proposal','calendar_update_preview'))):options['_source_plain']=False
+        if captured['terminal'] and options.get('_source_plain') and not captured.get('saved'):
+            try:item={**item,'source_saved':__import__('backend.memory.chat_sources',fromlist=['*']).finish(job[1],options.get('_source_consent'),job[5],captured['answer'],captured['status'],options.get('_source_exportable',False))}
+            except (ValueError,OSError):item={**item,'source_notice':'回答不受影响；聊天来源保存失败，请在记忆设置检查。'}
+            captured['saved']=True
+        original(item)
+    try:
+        with model_dispatch.context(job[3],job[8],job[4],tracked):return _generate(job,tracked,provider,calendar_intent)
+    finally:
+        options=job[9] if len(job)>9 else {}
+        if options.get('_source_plain') and not captured.get('saved'):
+            state='cancelled' if job[4].is_set() else captured['status']
+            try:__import__('backend.memory.chat_sources',fromlist=['*']).finish(job[1],options.get('_source_consent'),job[5],captured['answer'],state,options.get('_source_exportable',False))
+            except (ValueError,OSError):
+                # No transcript in diagnostics, no retry, and the chat answer remains intact.
+                __import__('logging').getLogger(__name__).warning('chat_source_persistence_failed')
 
 def _generate(job, emit, provider=None, calendar_intent=None):
     sid,c,epoch,rid,cancel,text,history,web_enabled,token=job[:9]
@@ -209,6 +231,7 @@ def _generate(job, emit, provider=None, calendar_intent=None):
         with LOCK:previous_calendar,calendar_references,selected_edit=context.calendar_inputs()
         decision=assistant_entry.route(text,provider or PROVIDER,cancel,context.files,bool(selected_edit),(c.understanding_pending or {}).get('fields'),c.calendar_pending if __import__('backend.calendar.assistant_calendar', fromlist=['*']).enabled() else None) if direct is None else {'route':'chat'}
         route=decision['route']
+        entry_opts['_source_plain']=route=='chat' and memory_plan is None and direct is None
         if route=='clarify' and decision.get('resume_pending') and ((c.calendar_pending or {}).get('fields') or {}).get('stage') in ('uncommitted_create','uncommitted_carrier'):route='calendar'
         with LOCK:
             if current() and decision.get('pending_file'):c.understanding_pending={'owner':'local','fields':decision['pending_file']}
@@ -320,6 +343,7 @@ def _generate(job, emit, provider=None, calendar_intent=None):
             if memory_plan is not None:context.remember('memory',text,output)
             elif file_out is None and not intent:context.remember('chat',text,output,memory_refs)
             elif intent:context.remember('calendar',text,output,memory_refs)
+            entry_opts['_source_exportable']=not bool(memory_refs)
             c.touched=session_now()
             outcome='complete'
             if pending_offer:
@@ -427,6 +451,22 @@ def handle(handler,body):
             if body.get('recover') is True:sid,c,recovery=__import__('backend.assistant.session_lifecycle', fromlist=['*']).resume(__import__(__name__, fromlist=['*']),body.get('session_id'),'web' if getattr(handler,'assistant_entry',False) else 'desktop',body.get('resume_hint'))
             else:sid,c=conversation(body.get('session_id'))
             handler.send_json(200,{'session_id':sid,'recovery':recovery,'chat_view':(c.cloud_history[-1].get('answer','') if c.cloud_history and c.cloud_history[-1].get('exportable') is True else ''),'conversation_empty':not c.submitted,'version':c.epoch,'calendar_edit':calendar_update.edit_public(c.calendar_edit) if c.calendar_edit else None,'file_snapshot':c.file_context.snapshot if c.file_context and c.last_domain=='files' else None,'task':c.task_view,'context_summary':SessionContext(c).summary(),'model':__import__('backend.providers.cloud_access', fromlist=['*']).status(c)})
+        return
+    if route in ('/api/bubble/calendar/reminder/recheck','/api/bubble/calendar/reminder/status'):
+        from backend.assistant.assistant_tasks import Task
+        sid=body.get('session_id');status_only=route.endswith('/status');rid=body.get('request_id') or uuid.uuid4().hex
+        with LOCK:
+            if sid not in SESSIONS:raise ValueError('会话已失效，请重新查询原事件；不要重新创建。')
+            c=SESSIONS[sid];version=c.epoch
+            if not status_only and c.request:raise ValueError('当前任务处理中，请稍后重新检查。')
+            event=threading.Event();token=task_status.begin(rid,'bubble') if not status_only else None
+            if not status_only:c.request=rid;c.cancel=event
+        task=Task(sid,rid,version,event,token,lambda:c.epoch==version and (status_only or c.request==rid))
+        try:handler.send_json(200,calendar_create.reminder_recovery(dict(body,action='status') if status_only else body,c,sid,task))
+        finally:
+            with LOCK:
+                if not status_only and c.request==rid:c.request=None;c.cancel=None
+            if token:task_status.finish(token)
         return
     if route.startswith('/api/bubble/calendar/'):
         sid=body.get('session_id')

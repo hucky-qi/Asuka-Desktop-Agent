@@ -23,3 +23,7 @@
 ![模拟创建与提醒独立回执](images/calendar-created-example.png)
 
 ![完整网页同一预览](images/calendar-web-preview-example.png)
+
+## 2026-10-24 稳定预览更新
+
+本机提醒基于可信读取身份，不写EventKit alarm；CalDAV/只读或共享状态未知不单独阻止助手自己的提醒。修改/删除仍按原支持范围、具体确认和版本核验。提醒默认关闭且只针对用户明确设置的事件；关机/睡眠/助手退出不保证准时。当前发布不新增私人日历或通知验收。

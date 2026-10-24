@@ -12,7 +12,7 @@ def snapshot(c,at):
  controls=copy.deepcopy(getattr(c,'daily_data_controls',{}));grant=c.cloud_grant
  if grant:
   for k in ('history','memory','file_intent','calendar_intent'):controls.setdefault(k,grant.get(k) is True)
- return {'persona_enabled':getattr(c,'persona_enabled',True),'persona_tone':getattr(c,'persona_tone','default'),'at':at,'entry':c.entry,'rows':rows,'provider':c.selected_provider,'controls':controls,'usage':copy.deepcopy(getattr(c,'daily_usage',{})),'blocked':bool(grant or getattr(c,'recovery_requires_grant',False)),'owner':c.memory_owner}
+ return {'persona_enabled':getattr(c,'persona_enabled',True),'persona_tone':getattr(c,'persona_tone','default'),'at':at,'entry':c.entry,'rows':rows,'provider':c.selected_provider,'controls':controls,'usage':copy.deepcopy(getattr(c,'daily_usage',{})),'blocked':bool(grant or getattr(c,'recovery_requires_grant',False)),'owner':c.memory_owner,'chat_source_segment':getattr(c,'chat_source_segment',None)}
 def cleanup(chat,now,exclude=None):
  for key,row in list(ARCHIVES.items()):
   if now-row['at']>ARCHIVE_TTL:ARCHIVES.pop(key,None)
@@ -58,7 +58,7 @@ def resume(chat,sid,entry='desktop',hint=None):
   key,c=chat.conversation();c.entry=entry;c.recovery_parent=sid
   if old:
    c.persona_enabled=old.get('persona_enabled',True);c.persona_tone=old.get('persona_tone','default')
-   c.memory_owner=old['owner'];c.cloud_history=old['rows'];c.submitted=bool(c.cloud_history);c.selected_provider=old['provider'];c.daily_data_controls=old['controls'];c.daily_usage=old['usage'] or {'calls':0,'output_tokens':0};c.recovery_requires_grant=old['blocked']
+   c.memory_owner=old['owner'];c.chat_source_segment=old.get('chat_source_segment') or c.chat_source_segment;c.cloud_history=old['rows'];c.submitted=bool(c.cloud_history);c.selected_provider=old['provider'];c.daily_data_controls=old['controls'];c.daily_usage=old['usage'] or {'calls':0,'output_tokens':0};c.recovery_requires_grant=old['blocked']
   if hint:
    if hint.get('requires_grant') is True:c.recovery_requires_grant=True
    if hint.get('provider')=='ollama':c.selected_provider='ollama'

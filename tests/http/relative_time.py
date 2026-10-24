@@ -24,7 +24,7 @@ class Model(bb.Dependencies):
   self.reply({'id':'synthetic-response','model':'deepseek-flash','choices':[{'message':{'role':'assistant','content':json.dumps(answer,ensure_ascii=False)},'finish_reason':'stop'}],'usage':{'prompt_tokens':100,'completion_tokens':100,'total_tokens':200}})
 class Calendar:
  def __init__(self,app):
-  self.root=app/'.runtime/calendar-ipc';self.root.mkdir(parents=True);self.mode='ok';self.change_after_create=False;self.catalog=None;self.calls=[];self.writes=[];self.events={};self.stop=threading.Event();self.thread=threading.Thread(target=self.loop,daemon=True);self.thread.start()
+  self.root=app/'.runtime/calendar-ipc';self.root.mkdir(parents=True);self.mode='ok';self.permission_mode='allowed';self.change_after_create=False;self.catalog=None;self.reminder_fields={};self.reminder_status='ok';self.reminder_entered=threading.Event();self.reminder_release=threading.Event();self.reminder_hold=False;self.calls=[];self.writes=[];self.events={};self.stop=threading.Event();self.thread=threading.Thread(target=self.loop,daemon=True);self.thread.start()
  def loop(self):
   import os
   while not self.stop.wait(.01):
@@ -36,12 +36,14 @@ class Calendar:
      self.calls.append(d);r={'id':d['id'],'status':self.mode,'events':[],'partial':False,'timezone':'Australia/Sydney'}
      if self.mode=='ok' and (d.get('action',d.get('operation'))=='read' or ('period' in d and 'action' not in d)):r['events']=list(copy.deepcopy(self.events).values());r['total']=len(r['events'])
      if self.mode=='ok' and d.get('action')=='update_check':r.update(event=copy.deepcopy(self.events.get(d['event_id'])),conflicts=[],conflict_version='synthetic-conflict')
+     if d.get('action') in ('permission_status','permission_authorize'):r['status']=self.permission_mode
      if self.mode=='ok' and d.get('action')=='reminder_check':
-      if d['event_id'] in self.events:r['event']=copy.deepcopy(self.events[d['event_id']])
+      if self.reminder_hold:self.reminder_entered.set();self.reminder_release.wait(6)
+      if d['event_id'] in self.events:r['event']=dict(copy.deepcopy(self.events[d['event_id']]),**self.reminder_fields);r['status']=self.reminder_status
       else:r['status']='not_found'
      if self.mode=='ok' and d.get('action')=='catalog':r['calendars']=self.catalog or [{'id':'synthetic-local','title':'合成日历','default':True,'writable':True}];r['duplicates']=[]
      if self.mode=='ok' and d.get('action')=='create':
-      self.writes.append(copy.deepcopy(d));eid='synthetic-event-'+d['operation_id'];self.events[eid]=dict(d['event'],event_id=eid,calendar_id=d['calendar_id'],calendar_title='合成日历',version='v1',reminder_supported=True,recurring=False,shared=False,has_attendees=False);r.update(status='verified',event_id=eid,event=d['event'])
+      self.writes.append(copy.deepcopy(d));eid='synthetic-event-'+d['operation_id'];self.events[eid]=dict(d['event'],event_id=eid,calendar_id=d['calendar_id'],calendar_title='合成日历',version='v1',reminder_supported=True,local_reminder_contract=1,local_reminder_supported=True,local_reminder_timezone='Australia/Sydney',recurring=False,shared=False,has_attendees=False);r.update(status='verified',event_id=eid,event=d['event'])
       if self.change_after_create:self.events[eid]['title']='合成外部变更'
      t=out.with_suffix('.tmp');t.write_text(json.dumps(r));t.replace(out)
     except (OSError,ValueError):pass

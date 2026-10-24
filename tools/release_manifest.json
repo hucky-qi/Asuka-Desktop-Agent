@@ -343,6 +343,10 @@
       "origin": "source"
     },
     {
+      "path": "frontend/settings-view.js",
+      "origin": "source"
+    },
+    {
       "path": "frontend/shared-reminder.js",
       "origin": "source"
     },
@@ -684,6 +688,46 @@
     },
     {
       "path": "docs/images/calendar-web-preview-example.png",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/local_reminder_delivery.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_reminder_native_time.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/desktop_bootstrap.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/memory/periodic_distillation.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/periodic_distillation.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/memory_adoption.py",
+      "origin": "source"
+    },
+    {
+      "path": "backend/memory/chat_sources.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/chat_sources.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/chat_source_repair.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/http/json_memory_repair.py",
       "origin": "source"
     }
   ]

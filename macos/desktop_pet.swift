@@ -1,4 +1,8 @@
 import AppKit
+
+private func reminderTimeValid(_ start:Date,_ lead:Int?,_ now:Date=Date())->Bool {
+    return start>now || (lead==0 && now.timeIntervalSince(start)>=0 && now.timeIntervalSince(start)<=60)
+}
 import WebKit
 
 // EDITING_MENU_BEGIN
@@ -298,7 +302,7 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         guard let id=r["id"] as? String,id.count==64,id.allSatisfy({$0.isHexDigit}),let delivery=r["delivery_id"] as? String,delivery.count==32,delivery.allSatisfy({$0.isHexDigit}),let v=r["version"] as? Int else{return false}
         let file=reminderRoot.deletingLastPathComponent().appendingPathComponent(r["synthetic"] as? Bool==true ? "reminder-tests/plans.json":"calendar-reminders/plans.json")
         guard let raw=try? Data(contentsOf:file),let d=(try? JSONSerialization.jsonObject(with:raw)) as? [String:Any],let items=d["items"] as? [String:[String:Any]],let row=items[id],row["version"] as? Int==v,row["delivery_id"] as? String==delivery,
-              ["claimed","system_accepted","system_visible","user_viewed"].contains(row["status"] as? String ?? ""),let text=row["start"] as? String,let start=ISO8601DateFormatter().date(from:text),start>Date() else{return false}
+              ["claimed","system_accepted","system_visible","user_viewed"].contains(row["status"] as? String ?? ""),let text=row["start"] as? String,let start=ISO8601DateFormatter().date(from:text),reminderTimeValid(start,row["lead_minutes"] as? Int) else{return false}
         return true
     }
     private func pollSharedReminders(){
@@ -312,7 +316,8 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             d["receipts"]=receipts
             DispatchQueue.main.async {
                 self.reminderReadPending=false;self.reminderRows=d["rows"] as? [[String:Any]] ?? []
-                if self.reminderRows.isEmpty && !self.reminderPresented{return}
+                // Previously displayed rows must also receive the terminal empty snapshot.
+                if self.reminderRows.isEmpty && !self.reminderPresented && self.reminderSnapshotHash == nil{return}
                 self.ensureChatWindow()
                 // Timestamp is a liveness check, not a presentation change.
                 var display=d;display.removeValue(forKey:"at");display.removeValue(forKey:"pid")
@@ -339,9 +344,17 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
         guard kind=="reminder_action" || kind=="reminder_reconcile",let op=data["operation_id"] as? String,op.count==32,op.allSatisfy({$0.isHexDigit}) else{return}
         if kind=="reminder_reconcile" {if reminderReceiptIDs.count<256{reminderReceiptIDs.insert(op)};pollSharedReminders();return}
-        guard let id=data["id"] as? String,let delivery=data["delivery_id"] as? String,let version=data["version"] as? Int,let row=reminderRows.first(where:{$0["id"] as? String==id && $0["version"] as? Int==version && $0["delivery_id"] as? String==delivery}),["snooze","dismiss"].contains(data["action"] as? String ?? "") else{return}
+        guard let id=data["id"] as? String,id.count==64,id.allSatisfy({$0.isHexDigit}),let delivery=data["delivery_id"] as? String,delivery.count==32,delivery.allSatisfy({$0.isHexDigit}),let version=data["version"] as? Int,["snooze","dismiss"].contains(data["action"] as? String ?? "") else{return}
         guard reminderReceiptIDs.count<256 || reminderReceiptIDs.contains(op) else{return}
         reminderReceiptIDs.insert(op);let root=reminderRoot
+        guard let row=reminderRows.first(where:{$0["id"] as? String==id && $0["version"] as? Int==version && $0["delivery_id"] as? String==delivery}) else{
+            // A stale visible button must finish with failure, never hang or write.
+            reminderIO.async {
+                let failed:[String:Any]=["status":"failed","message":"提醒已结束或已变化，旧操作未执行。"]
+                if let raw=try? JSONSerialization.data(withJSONObject:failed){try? raw.write(to:root.appendingPathComponent(op+".action.result.json"),options:.atomic)}
+            }
+            return
+        }
         reminderIO.async {
             guard self.trustedReminder(row) else{
                 let failed:[String:Any]=["status":"failed","message":"提醒已变化，旧操作无效。"]

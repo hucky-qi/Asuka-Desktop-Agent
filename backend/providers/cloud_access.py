@@ -112,6 +112,7 @@ def ledger():
    with os.fdopen(fd,'w') as t:json.dump(d,t);t.flush();os.fsync(t.fileno())
    os.replace(temp,path)
 class Permit:
+ max_output_tokens=512
  def __init__(self,c,rid,cancel,version,expected,refs=(),slot='main'):self.c=c;self.rid=rid;self.call_id=rid if slot=='main' else rid+':'+slot;self.cancel=cancel;self.version=version;self.used=False;self.record_id=None;self.test_budget=None;self.test_reservation=None;self.expected=expected;self.refs=list(refs);self.profile=slot
  def check_memory_refs(self):MemoryAccess.validate_refs(self.c,self.refs,'cloud')
  def reserve(self,payload,base_url,api_key):
@@ -122,7 +123,7 @@ class Permit:
    if g.get('daily'):raise ValueError('此工具需要独立资料范围授权，未发送。')
    self.check_memory_refs()
    import hmac
-   if cfg['base_url']!=base_url or not hmac.compare_digest(cfg['api_key'],api_key) or type(payload.get('max_tokens')) is not int or not 1<=payload['max_tokens']<=512:raise ValueError('服务、凭据或输出范围不匹配当前授权，未发送请求。')
+   if cfg['base_url']!=base_url or not hmac.compare_digest(cfg['api_key'],api_key) or type(payload.get('max_tokens')) is not int or not 1<=payload['max_tokens']<=self.max_output_tokens:raise ValueError('服务、凭据或输出范围不匹配当前授权，未发送请求。')
    if payload['messages']!=self.expected:raise ValueError('发送资料超出本次授权，未发送请求。')
    if payload['model']!=cfg['model'] or payload.get('tools'):raise ValueError('本次授权不包含该模型或工具调用。')
    size=len(json.dumps(payload,ensure_ascii=False).encode('utf-8'));output=payload['max_tokens']
@@ -227,7 +228,7 @@ class UnderstandingProvider:
   if not is_calendar:hint['optional']['expression']='null or {mode:serious|default,scope:turn|session,evidence:exact current user substring}; no other fields'
   if daily:
    hint['optional']['preference']=__import__('copy').deepcopy(__import__('backend.assistant.daily_chat', fromlist=['*']).PREFERENCE)
-   wire=hint['optional']['preference'];wire['properties'].pop('scope',None);wire['required']=list(wire['properties'])
+   wire=hint['optional']['preference'];wire['properties'].pop('scope',None);wire.pop('required',None);wire['all_properties_required']=True  # Compact guide only; actual response schema retains its required list.
   if daily and self.preference_pending:
    hint=__import__('backend.memory.preference_application', fromlist=['*']).understanding_hint();hint['properties']['expression']=__import__('backend.persona', fromlist=['*']).EXPRESSION;hint['properties']['journal']=__import__('backend.memory.daily_records', fromlist=['*']).wire_schema()
   if daily:
@@ -240,14 +241,20 @@ class UnderstandingProvider:
    if self.preference_pending:hint['properties']['calendar_action']='calendar action enum declared in INTENT_BOUNDARY or null'
    else:hint['optional']['calendar_action']='calendar action enum declared in INTENT_BOUNDARY or null'
   if daily:hint['top_level_allowed']=list(SCHEMA['properties']);hint['key_rule']='Only declared top-level keys. Route names are VALUES, not additional keys. Never claim execution in the routing reply.'
-  expected=[{'role':'system','content':__import__('backend.providers.model_providers', fromlist=['*']).schema_instruction(hint if hint is not None else format,compact=hint is not None)}]+messages
+  # JSON mode requires an output instance in addition to this descriptive wire contract.
+  # The example contains no user fact/ID/permission and is checked against the actual schema.
+  example=None
+  if daily and not self.preference_pending:
+   example={'route':'chat','file':None,'reply':'"q"\n','expression':None}
+   __import__('jsonschema').validate(example,format)
+  expected=[{'role':'system','content':__import__('backend.providers.model_providers', fromlist=['*']).schema_instruction(hint if hint is not None else format,compact=hint is not None,example=example)}]+messages
   self.refs=refs;self.retrieved_refs=list(refs)
   permit_type=__import__('backend.assistant.daily_chat', fromlist=['*']).DailyPermit if (daily or (is_calendar and g.get('daily'))) else Permit
   permit=permit_type(self.c,self.rid,self.cancel,self.epoch,expected,refs,slot='calendar' if is_calendar else 'understanding')
   started=time.monotonic()
   profile=__import__('copy').deepcopy(format)
   if daily and self.preference_pending:profile['properties']['reply']['type']=['string','null']
-  result=provider(self.c).chat(messages=messages,format=profile,schema_hint=hint,stream=False,cancel=self.cancel,permit=permit,request_id=self.rid,max_tokens=768 if daily else 512)
+  result=provider(self.c).chat(messages=messages,format=profile,schema_hint=hint,schema_example=example,stream=False,cancel=self.cancel,permit=permit,request_id=self.rid,max_tokens=768 if daily else 512)
   if daily and self.preference_pending:
    obj=json.loads(result.message.content);self.fallback_reply=obj.get('reply');obj['reply']=obj.get('reply') or '';result.message.content=json.dumps(obj,ensure_ascii=False)
   self.expression=json.loads(result.message.content).get('expression') if not is_calendar else None
@@ -274,10 +281,15 @@ def execute_understood(c,sid,epoch,rid,cancel,text,emit,task,options):
  pending=c.understanding_pending
  safe_pending=pending['fields'] if pending and pending.get('owner')==g['id'] and not pending['fields']['arguments'].get('directory') else None
  decision=assistant_entry.route(text,adapter,cancel,context.files,bool(c.calendar_edit),safe_pending,c.calendar_pending if (c.calendar_pending or {}).get('owner')==g['id'] else None);task.check();route=decision['route']
+ options['_memory_read']=route=='memory_read'
+ if route=='memory_read':
+  route='chat'  # A read completes even with zero authorized matches; it is never a write or ordinary source.
+  if not getattr(adapter,'refs',[]):decision['reply']='当前没有获准的相关记忆依据，无法确认。'
  # A schema-valid calendar offer is only an ask, never a write. Honor it even
  # when the coarse chat route conflicts; all calendar data gates below still apply.
  if route=='chat' and getattr(adapter,'calendar_action',None)=='offer':route=decision['route']='calendar'
  if route=='clarify' and decision.get('resume_pending') and (c.calendar_pending or {}).get('owner')==g['id'] and ((c.calendar_pending or {}).get('fields') or {}).get('stage') in ('uncommitted_create','uncommitted_carrier'):route=decision['route']='calendar';adapter.calendar_action='clarify'
+ options['_source_plain']=route=='chat' and not options['_memory_read'] and not getattr(adapter,'preference',None) and not getattr(adapter,'behavior',None)
  with session_lock:
   task.check()
   MemoryAccess.validate_refs(c,getattr(adapter,'retrieved_refs',[]),'cloud')
@@ -339,6 +351,7 @@ def execute_understood(c,sid,epoch,rid,cancel,text,emit,task,options):
    applied,presentation,application_status=__import__('backend.memory.preference_application', fromlist=['*']).generate(adapter,adapter.answer_context,text,task)
    if applied:output=applied
    if application_status:route='clarify'
+  if route=='memory' and not preference_output:decision['reply']='尚未保存或更改长期记忆；请明确要保存、更改或遗忘的内容。'  # An unhandled model route is not a successful storage receipt.
   if not output:output=decision.get('reply') or ('该操作仍由本地入口处理；当前云端文件理解未授权日历、记忆管理或写入。请切回本地。' if route in ('calendar','memory','memory_read') else '请补充要处理的事项或文件条件。')
   kind='text' if route=='chat' else 'clarification';data={'message':output,'tools_executed':False}
   if presentation:data.update(presentation=presentation,preference_trace=adapter.preference_trace)
@@ -363,6 +376,8 @@ def execute_understood(c,sid,epoch,rid,cancel,text,emit,task,options):
 
   else:c.last_domain='calendar_behavior' if getattr(adapter,'behavior',None) else 'chat'
   if route=='chat':__import__('backend.memory.style_preferences', fromlist=['*']).finish(c,rid)
+  options['_source_plain']=route=='chat' and not options.get('_memory_read') and not preference_output and not getattr(adapter,'behavior',None)
+  options['_source_exportable']=not bool(getattr(adapter,'refs',[]))
   if route=='chat':c.cloud_history=(c.cloud_history+[{'question':text,'answer':output,'refs':getattr(adapter,'refs',[]),'answer_summary':getattr(adapter,'answer_summary',None),'exportable':not bool(locals().get('learning_status') or locals().get('preference_output') or getattr(adapter,'behavior',None))}])[-4:]
   result=task.result(kind,data,status);c.task_view=result['task'];c.request=None;c.cancel=None;c.active_domain=None
   emit({'type':'done','state':'complete','answer':output,'request_id':rid,'provider':'deepseek','model':adapter.response_model or cfg['model'],'usage':adapter.usage,'assistant_result':result})

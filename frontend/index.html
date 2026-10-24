@@ -289,4 +289,4 @@ document.getElementById('clearChat').addEventListener('click',async event=>{
 });
 
 (async()=>{const key=new URLSearchParams(location.search).get('file_session');if(!key)return;try{const r=await postJSON('/api/files/current',{session_id:key});sessionId=key;add('assistant',r.answer,[r.event]);}catch(error){add('assistant','文件快照未能恢复：'+error.message)}})();
-</script><script src="/persona-view.js"></script><script src="/calendar-view.js"></script><script src="/file-qa-view.js"></script><script src="/memory-view.js"></script><script src="/daily-settings.js"></script><script src="/speech-view.js"></script><script src="/unified-web.js"></script></body></html>
+</script><script src="/settings-view.js"></script><script src="/persona-view.js"></script><script src="/calendar-view.js"></script><script src="/file-qa-view.js"></script><script src="/memory-view.js"></script><script src="/daily-settings.js"></script><script src="/speech-view.js"></script><script src="/unified-web.js"></script></body></html>

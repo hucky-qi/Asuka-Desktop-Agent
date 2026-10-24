@@ -25,7 +25,7 @@ class MemoryAccess:
  delete=staticmethod(lambda id,revision:bubble_memory.mutate('delete',id=id,revision=revision))
  @staticmethod
  def list_for(conversation=None):
-  state=bubble_memory.snapshot();state['style_cloud']=__import__('backend.memory.style_preferences', fromlist=['*']).policy();state['record_cloud']=__import__('backend.memory.daily_records', fromlist=['*']).policy();entry=getattr(conversation,'entry',None);owner=getattr(conversation,'memory_owner',None)
+  state=bubble_memory.snapshot();state['chat_sources']=__import__('backend.memory.chat_sources',fromlist=['*']).status(conversation or type('View',(),{'entry':'desktop','memory_owner':None})());state['style_cloud']=__import__('backend.memory.style_preferences', fromlist=['*']).policy();state['distillation']=__import__('backend.memory.periodic_distillation',fromlist=['*']).status(conversation or type('View',(),{'entry':None,'memory_owner':None})());state['record_cloud']=__import__('backend.memory.daily_records', fromlist=['*']).policy();entry=getattr(conversation,'entry',None);owner=getattr(conversation,'memory_owner',None)
   return {**state,**{k:[dict(r,cloud_style_effective=__import__('backend.memory.style_preferences', fromlist=['*']).permitted(r) if not r.get('journal') else False,cloud_record_effective=__import__('backend.memory.daily_records', fromlist=['*']).allowed(r) if r.get('journal') else False) for r in state.get(k,[]) if bubble_memory.visible(r,entry,owner)] for k in ('items','inactive')}}
  @staticmethod
  def read_for(conversation,task,query='',destination='local',state=None):
@@ -120,6 +120,10 @@ class MemoryAccess:
  @staticmethod
  def api(body,conversation):
   action=body.get('action','list')
+  if isinstance(action,str) and action.startswith('chat_source_'):
+   __import__('backend.memory.chat_sources',fromlist=['*']).manage(body,conversation);return MemoryAccess.list_for(conversation)
+  if isinstance(action,str) and action.startswith('distillation_'):
+   result=__import__('backend.memory.periodic_distillation',fromlist=['*']).manage(body,conversation);return {**MemoryAccess.list_for(conversation),'distillation':result,**({'message':result['message']} if result.get('message') else {})}
   if isinstance(action,str) and action.startswith('record_'):return __import__('backend.memory.daily_records', fromlist=['*']).api(conversation,body)
   if action=='style_cloud_config':
    __import__('backend.memory.style_preferences', fromlist=['*']).configure(body.get('enabled'),body.get('policy_revision'));return MemoryAccess.list_for(conversation)
