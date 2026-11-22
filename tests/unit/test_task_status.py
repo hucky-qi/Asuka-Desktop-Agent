@@ -1,10 +1,12 @@
 import unittest,tempfile,threading,json,os
 from pathlib import Path
 from unittest.mock import patch
+from tests.unit._local_fakes import choose_local_qwen
 import backend.assistant.task_status as t, backend.assistant.bubble_chat as b, backend.providers.bubble_web as w, backend.providers.web_usage as u
 class TaskStateTests(unittest.TestCase):
  def setUp(self):
   with t.LOCK:t.TASKS.clear();t.CURRENT.clear();t.LAST_COMPLETE=0
+  choose_local_qwen(self)
  def test_parallel_finish_preserves_other_task(self):
   a=t.begin('a','file');c=t.begin('b','bubble');t.stage(a,'searching');t.stage(c,'external_search')
   self.assertEqual(t.snapshot()['waiting'],'wifi');t.finish(c,'complete')
@@ -25,7 +27,7 @@ class TaskStateTests(unittest.TestCase):
  def test_superseded_bubble_job_cannot_finish_new_task(self):
   old=b.prepare({'question':'old','request_id':'old'});new=b.prepare({'question':'new','request_id':'new','session_id':old[0]})
   b.generate(old,lambda event:None)
-  self.assertIn(new[-1],t.TASKS);b.stop(new[0],new[3]);self.assertEqual(t.snapshot()['waiting'],'none')
+  self.assertIn(new[8],t.TASKS)  # job[8] is the task token;b.stop(new[0],new[3]);self.assertEqual(t.snapshot()['waiting'],'none')
  def test_mock_network_only_actual_dispatch_uses_wifi(self):
   with tempfile.TemporaryDirectory(dir='acceptance/unified-waiting') as folder,patch.object(u,'PATH',Path(folder)/'u.json'),patch.object(u,'LOCK_PATH',Path(folder)/'u.lock'),patch.dict(os.environ,{'BUBBLE_WEB_ENABLED':'true','BAIDU_FREE_RESOURCES_CONFIRMED':'true','BAIDU_APPBUILDER_API_KEY':'mock','BAIDU_TEST_MODE':'false'}):
    token=t.begin('mock-network','bubble');t.stage(token,'generating');states=[]

@@ -397,6 +397,8 @@ LAUNCHER_SUFFIXES = {
     ".applescript", ".osax", ".fileloc", ".webloc", ".inetloc", ".url", ".shortcut",
     ".mobileconfig", ".configprofile", ".prefpane", ".saver", ".plugin", ".kext",
     ".bundle", ".dylib", ".so", ".exe", ".bat", ".cmd", ".ps1", ".vbs", ".msi", ".py", ".pyw",
+    ".wflow", ".service", ".appex", ".xpc", ".systemextension", ".dext", ".qlgenerator",
+    ".mdimporter", ".inputplugin",
 }
 EXECUTABLE_MAGIC = (b"#!", b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf",
                     b"\xfe\xed\xfa\xce", b"\xca\xfe\xba\xbe")

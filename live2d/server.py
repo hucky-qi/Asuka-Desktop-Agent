@@ -10,7 +10,20 @@ ROOT = Path(__file__).resolve().parent/'.runtime'
 
 
 class Handler(SimpleHTTPRequestHandler):
+    def local_host(self):
+        # DNS-rebinding guard, same rule as the chat backend: only the loopback address we bound.
+        return self.headers.get('Host') == f'127.0.0.1:{self.server.server_address[1]}'
+
+    def do_HEAD(self):
+        if not self.local_host():
+            self.send_error(403)
+            return
+        super().do_HEAD()
+
     def do_GET(self):
+        if not self.local_host():
+            self.send_error(403)
+            return
         path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
         if path == '/health':
             self.send_response(200)

@@ -8,14 +8,13 @@ class Response:
  def __enter__(self):return self
  def __exit__(self,*args):pass
  def read(self,*args):return json.dumps({'references':[{'title':'公开摘要','url':'https://example.org/source','content':'来源证据'}]}).encode()
-class Provider:
- def __init__(self):self.calls=[]
- def chat(self,**kw):self.calls.append(kw);yield NS(message=NS(content='摘要归纳 [1]'))
+from tests.unit._local_fakes import LocalProvider, choose_local_qwen, replace_module_provider
+def Provider():return LocalProvider('摘要归纳 [1]')
 class BaiduTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory(dir=Path('acceptance/baidu-navigation'));root=Path(self.tmp.name).resolve();self.patches=[patch.object(u,'PATH',root/'usage.json'),patch.object(u,'LOCK_PATH',root/'usage.lock'),patch.dict(os.environ,{'BUBBLE_WEB_ENABLED':'true','BAIDU_APPBUILDER_API_KEY':'mock','BAIDU_FREE_RESOURCES_CONFIRMED':'true','BAIDU_TEST_MODE':'false','BAIDU_LOCAL_DAILY_LIMIT':'50','BAIDU_TEST_LIMIT':'2'})]
   for p in self.patches:p.start()
-  b.SESSIONS.clear()
+  b.SESSIONS.clear();choose_local_qwen(self)
  def tearDown(self):
   for p in reversed(self.patches):p.stop()
   self.tmp.cleanup()
@@ -23,14 +22,15 @@ class BaiduTests(unittest.TestCase):
   calls=[]
   def transport(req,timeout):calls.append(req);return Response()
   def run(enabled,rid):
-   job=b.prepare({'question':'公开基础问题','request_id':rid,'web_enabled':enabled});events=[]
-   with patch.object(w,'urlopen',side_effect=transport):b.generate(job,events.append,Provider())
+   job=b.prepare({'question':'公开基础问题','request_id':rid,'web_enabled':enabled});events=[];provider=Provider();replace_module_provider(self,provider)
+   with patch.object(w,'urlopen',side_effect=transport):b.generate(job,events.append,provider)
    return events
   run(False,'local');self.assertEqual(calls,[])
   events=run(True,'web');self.assertEqual(len(calls),1)
   payload=json.loads(calls[0].data);self.assertEqual(payload['messages'],[{'role':'user','content':'公开基础问题'}]);self.assertNotIn('model',payload)
   self.assertTrue(calls[0].full_url.endswith('/web_search'));self.assertEqual(u.status()['used'],1)
-  self.assertTrue(any(e.get('source')=='百度搜索摘要' for e in events))
+  done=[e for e in events if e['type']=='done'][-1];self.assertEqual([x['url'] for x in done['sources']],['https://example.org/source'])
+  self.assertIn('百度搜索摘要',done['answer'])
  def test_limit_and_concurrency_persistence(self):
   os.environ['BAIDU_LOCAL_DAILY_LIMIT']='3'
   def attempt(_):
@@ -38,7 +38,7 @@ class BaiduTests(unittest.TestCase):
    except ValueError:return False
   with ThreadPoolExecutor(max_workers=8) as pool:out=list(pool.map(attempt,range(8)))
   self.assertEqual(sum(out),3);self.assertEqual(u.status()['used'],3)
-  code="import web_usage as u;from pathlib import Path;u.PATH=Path("+repr(str(u.PATH))+");u.LOCK_PATH=Path("+repr(str(u.LOCK_PATH))+");print(u.status()['used'])"
+  code="import sys;sys.path.insert(0,"+repr(str(settings.PROJECT))+");import backend.providers.web_usage as u;from pathlib import Path;u.PATH=Path("+repr(str(u.PATH))+");u.LOCK_PATH=Path("+repr(str(u.LOCK_PATH))+");print(u.status()['used'])"
   out=subprocess.check_output([sys.executable,'-c',code],text=True);self.assertEqual(out.strip(),'3')
  def test_test_budget_failure_counts_cancel_before_send_does_not(self):
   os.environ['BAIDU_TEST_MODE']='true'

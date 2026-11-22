@@ -4,6 +4,8 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 import backend.providers.baidu_config as c, backend.providers.bubble_web as w, backend.providers.baidu_error_log as log
 class AuthOffline(unittest.TestCase):
+ @unittest.skipUnless(c.ENV_PATH.is_file() and any(k in c.read_env(c.ENV_PATH) for k in ('BAIDU_APPBUILDER_API_KEY','BAIDU_API_KEY')),
+                      'no local Baidu credential file on this machine (e.g. a fresh public clone)')
  def test_real_config_header_consistency_without_network(self):
   # Actual authorized file, but the only transport is an in-process stub.
   file=c.read_env(c.ENV_PATH);target=file.get('BAIDU_APPBUILDER_API_KEY',file.get('BAIDU_API_KEY',''))

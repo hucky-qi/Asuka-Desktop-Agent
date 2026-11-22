@@ -21,6 +21,12 @@ try:
 except ModuleNotFoundError:
     sys.modules["ollama"] = SimpleNamespace(chat=lambda **kwargs: None, embed=lambda **kwargs: None)
 
+# Importing backend.app starts the real reminder scheduler; tests must never deliver
+# real notifications when the production backend (which holds scheduler.lock) is down.
+import backend.calendar.calendar_reminders as _calendar_reminders
+import backend.calendar.reminder_test_service as _reminder_test_service
+_calendar_reminders.start = lambda: None
+_reminder_test_service.resume = lambda: None
 import backend.app as app
 import macos.desktop_pet as desktop_pet
 import backend.files.file_reader as file_reader

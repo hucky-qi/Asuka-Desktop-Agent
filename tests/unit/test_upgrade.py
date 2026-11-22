@@ -42,10 +42,16 @@ class UpgradeTests(unittest.TestCase):
     def test_explicit_folder_never_broadens_and_content_intent_is_literal(self):
         folder=self.desktop/'courses';folder.mkdir();(folder/'topic.txt').write_text('strategyproofness')
         (self.desktop/'outside.txt').write_text('strategyproofness')
-        with self.model('semantic_search_files', {'query':'anything','scope':'all'}):
+        # Since 2026-10-22 the validated model contract (not a broad "包含" regex) picks literal vs
+        # semantic search; the quoted folder stays a hard boundary for either choice.
+        with self.model('search_file_content', {'keyword':'strategyproofness','scope':'all'}):
             _,events=app.answer('在桌面“courses”文件夹找包含 strategyproofness 的文件',app.Session())
         self.assertEqual(events[0]['tool'],'search_file_content')
         self.assertEqual([x['name'] for x in events[0]['results']],['topic.txt'])
+        with self.model('semantic_search_files', {'query':'strategyproofness','scope':'all'}):
+            _,events=app.answer('在桌面“courses”文件夹找包含 strategyproofness 的文件',app.Session())
+        self.assertNotIn('outside.txt',[x['name'] for x in events[0].get('results',[])])
+        self.assertTrue(all(Path(x['path']).parent.name=='courses' for x in events[0].get('results',[])))
         with self.model('find_files', {'keyword':'','scope':'all'}):
             reply,events=app.answer('在桌面“missing”文件夹找图片',app.Session())
         self.assertFalse(events)

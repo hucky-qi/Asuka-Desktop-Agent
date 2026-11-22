@@ -50,13 +50,14 @@ class MacAcceptanceTests(unittest.TestCase):
             with patch.object(settings, 'SEARCH_ROOTS', {'workspace': safe}), \
                  patch.object(file_relationships, 'trash_file') as trash:
                 groups = [[file_tools.file_info(keep), file_tools.file_info(remove)]]
-                plan = file_relationships.plan_duplicate_cleanup(groups, [str(remove)])
+                shown = groups[0][1]['path']  # only the displayed (resolved, e.g. /private/var) path is selectable
+                plan = file_relationships.plan_duplicate_cleanup(groups, [shown])
                 keep.write_text('changed')
                 with self.assertRaises(ValueError):
                     file_relationships.execute_duplicate_cleanup(plan)
                 trash.assert_not_called()
                 keep.write_text('same')
-                plan = file_relationships.plan_duplicate_cleanup(groups, [str(remove)])
+                plan = file_relationships.plan_duplicate_cleanup(groups, [shown])
                 remove.unlink()
                 remove.symlink_to(outside)
                 with self.assertRaises(ValueError):

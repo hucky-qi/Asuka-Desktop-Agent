@@ -11,7 +11,8 @@ class LayoutTests(unittest.TestCase):
    self.assertEqual(json.loads(r.stdout),[str(PROJECT),str(FRONTEND),str(MACOS),str(SWIFT_CACHE),str(PROJECT/'.semantic_index.sqlite3'),str(PROJECT/'.assistant_preferences.json')])
  def test_old_lock_prevents_second_pet_from_foreign_cwd(self):
   with (PROJECT/'.desktop-pet.lock').open('a') as lock,tempfile.TemporaryDirectory() as cwd:
-   fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+   try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+   except BlockingIOError:pass  # the real desktop pet already holds it: the same "existing pet" state
    r=subprocess.run([sys.executable,str(PROJECT/'desktop_pet.py'),'--bubble-chat'],cwd=cwd,capture_output=True,text=True,timeout=8)
    self.assertEqual(r.returncode,0,r.stderr);self.assertIn('已运行',r.stdout)
  def test_synthetic_runtime_uses_packaged_scheduler_without_notifications(self):

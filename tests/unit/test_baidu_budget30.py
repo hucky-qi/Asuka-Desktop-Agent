@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 from concurrent.futures import ThreadPoolExecutor
 import backend.providers.web_usage as u, backend.providers.bubble_web as w
+PROJECT_ROOT=Path(__file__).resolve().parents[2]
 class Response:
  def __enter__(self):return self
  def __exit__(self,*a):pass
@@ -36,7 +37,7 @@ class Budget30Tests(unittest.TestCase):
   self.assertEqual(sum(out),2);self.assertEqual(len(calls),2);self.assertEqual(u.status()['used'],30)
  def test_restart_persistence(self):
   self.seed(29);w.search('公开问题',threading.Event(),lambda *a,**k:Response())
-  code=f"import web_usage as u;from pathlib import Path;u.PATH=Path({str(u.PATH)!r});u.LOCK_PATH=Path({str(u.LOCK_PATH)!r});print(u.status()['used'],u.status()['limit'])"
+  code=f"import sys;sys.path.insert(0,{str(PROJECT_ROOT)!r});import backend.providers.web_usage as u;from pathlib import Path;u.PATH=Path({str(u.PATH)!r});u.LOCK_PATH=Path({str(u.LOCK_PATH)!r});print(u.status()['used'],u.status()['limit'])"
   self.assertEqual(subprocess.check_output([sys.executable,'-c',code],text=True).strip(),'30 30')
  def test_cancellation_before_and_after_dispatch(self):
   self.seed(0);c=threading.Event();c.set();calls=[]

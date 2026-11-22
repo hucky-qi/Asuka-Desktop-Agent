@@ -4,6 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch,Mock
 from array import array
+from tests.unit._local_fakes import qwen_web_session
+import backend.providers.cloud_access as cloud_access
 import backend.app as app, backend.diagnostics as diagnostics, backend.files.file_tools as file_tools, backend.files.semantic_search as semantic_search, backend.settings as settings, backend.files.search_intent as search_intent, backend.files.retrieval_cache as retrieval_cache, backend.providers.model_providers as model_providers
 
 class PerformanceTests(unittest.TestCase):
@@ -59,7 +61,7 @@ class PerformanceTests(unittest.TestCase):
    if len(calls)==1:return NS(message=NS(content='',tool_calls=[NS(function=NS(name='find_files',arguments={'keyword':'4418','scope':'workspace'}))]))
    release.wait(3);return NS(message=NS(content='done',tool_calls=[]))
   url=f'http://127.0.0.1:{server.server_port}'
-  req=urllib.request.Request(url+'/api/chat',data=json.dumps({'question':'复杂表达需模型处理','scope':'workspace','request_id':'stream-test','stream':True}).encode(),headers={'Content-Type':'application/json','Origin':url})
+  req=urllib.request.Request(url+'/api/chat',data=json.dumps({'question':'复杂表达需模型处理','scope':'workspace','session_id':qwen_web_session(),'request_id':'stream-test','stream':True}).encode(),headers={'Content-Type':'application/json','Origin':url})
   with patch.object(app,'chat',side_effect=model),urllib.request.urlopen(req,timeout=5) as response:
    while True:
     event=json.loads(response.readline())
@@ -72,7 +74,7 @@ class PerformanceTests(unittest.TestCase):
   server=app.ThreadingHTTPServer((settings.HOST,0),app.Handler);old_port=settings.PORT;settings.PORT=server.server_port
   self.addCleanup(setattr,settings,'PORT',old_port);self.addCleanup(server.server_close);self.addCleanup(server.shutdown)
   threading.Thread(target=server.serve_forever,daemon=True).start();entered=threading.Event();release=threading.Event();self.addCleanup(release.set)
-  key,state=app.session_for(None);url=f'http://127.0.0.1:{server.server_port}';responses=[]
+  key=qwen_web_session();url=f'http://127.0.0.1:{server.server_port}';responses=[]
   def post(body):
    request=urllib.request.Request(url+'/api/chat',data=json.dumps(body).encode(),headers={'Content-Type':'application/json','Origin':url})
    with urllib.request.urlopen(request,timeout=5) as response:return json.load(response)
@@ -83,7 +85,7 @@ class PerformanceTests(unittest.TestCase):
    self.assertTrue(entered.wait(2));new=post({'question':'找 4418','scope':'workspace','session_id':key,'request_id':'new-wins'})
    release.set();thread.join(3)
   self.assertTrue(responses[0]['cancelled']);self.assertEqual(new['events'][0]['total'],2)
-  self.assertIn(key,app.SESSIONS);self.assertFalse(any(x['content']=='old answer' for x in app.SESSIONS[key].history))
+  self.assertIn(new['session_id'],app.SESSIONS);self.assertFalse(any(x['content']=='old answer' for x in app.SESSIONS[new['session_id']].history))
  def test_clear_cancels_inflight_and_preserves_empty_context(self):
   key,state=app.session_for(None);cancel=threading.Event()
   with app.CHAT_JOBS_LOCK:app.CHAT_JOBS['clear-inflight']={'state':state,'cancel':cancel,'session_id':key}
@@ -91,44 +93,50 @@ class PerformanceTests(unittest.TestCase):
   fresh=app.clear_chat(key,'clear-inflight')
   self.assertTrue(cancel.is_set());self.assertEqual(app.SESSIONS[fresh].history,[]);self.assertNotIn(key,app.SESSIONS)
 
+class MockPermit(cloud_access.Permit):
+ """In-memory grant for wire tests: never touches the real .deepseek-usage.json ledger."""
+ def __init__(self,rid):self.rid=rid;self.reserved=[];self.records=[]
+ def reserve(self,payload,base_url,api_key):self.reserved.append(payload)
+ def record(self,status,usage=None,diagnostic=None):self.records.append(status)
+ def check_memory_refs(self):pass
+
 class ProviderTests(unittest.TestCase):
- def test_disabled_or_no_key_never_constructs_request(self):
+ def test_disabled_no_key_or_unpermitted_never_constructs_request(self):
   transport=Mock(side_effect=AssertionError('network forbidden'))
-  for p in [model_providers.DeepSeekProvider(transport=transport),model_providers.DeepSeekProvider(enabled=True,transport=transport)]:
-   with self.assertRaises(RuntimeError):p.chat(messages=[])
+  for p,permit in [(model_providers.DeepSeekProvider(transport=transport),MockPermit('r')),
+                   (model_providers.DeepSeekProvider(enabled=True,transport=transport),MockPermit('r')),
+                   (model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=transport),None),
+                   (model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=transport),MockPermit('other'))]:
+   with self.assertRaises(model_providers.CloudError):p.chat(messages=[],permit=permit,request_id='r')
   transport.assert_not_called()
- def test_mock_request_tools_and_tool_ids(self):
-  response=io.BytesIO(json.dumps({'choices':[{'message':{'content':None,'tool_calls':[{'id':'c1','function':{'name':'find_files','arguments':'{"keyword":"4418"}'}}]}}]}).encode())
-  transport=Mock(return_value=response);p=model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=transport)
-  data=p.chat(messages=[{'role':'user','content':'fixture'}],tools=[{'type':'function','function':{'name':'find_files'}}])
-  self.assertEqual(data.message.tool_calls[0].function.arguments,{'keyword':'4418'})
-  request=transport.call_args.args[0];payload=json.loads(request.data);self.assertEqual(payload['model'],'deepseek-flash')
-  msg=p.message(data.message);self.assertEqual(msg['tool_calls'][0]['id'],'c1')
-  with self.assertRaises(ValueError):p.chat(messages=[{'role':'tool','tool_name':'find_files','content':'{}'}])
- def test_mock_stream_fragments_cancel_closes(self):
-  response=io.BytesIO(b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n')
-  transport=Mock(return_value=response);p=model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=transport);cancel=threading.Event()
-  stream=p.chat(messages=[],stream=True,cancel=cancel);self.assertEqual(next(stream)['delta']['content'],'hello');cancel.set()
-  with self.assertRaises(model_providers.ProviderCancelled):next(stream)
-  self.assertTrue(response.closed)
+ def test_mock_request_settles_and_cloud_tool_calls_are_refused(self):
+  def reply(body):
+   response=io.BytesIO(json.dumps(body).encode());response.status=200;response.headers={};return response
+  tool_call={'choices':[{'finish_reason':'tool_calls','message':{'content':None,'tool_calls':[{'id':'c1','function':{'name':'find_files','arguments':'{"keyword":"4418"}'}}]}}]}
+  transport=Mock(return_value=reply(tool_call));p=model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=transport);permit=MockPermit('t')
+  with self.assertRaises(model_providers.CloudError):p.chat(messages=[{'role':'user','content':'fixture'}],permit=permit,request_id='t')
+  self.assertEqual(transport.call_count,1)  # cloud may never trigger local tools; no retry
+  transport=Mock(return_value=reply({'choices':[{'finish_reason':'stop','message':{'content':'hi'}}],'usage':{'total_tokens':3}}))
+  p=model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=transport);permit=MockPermit('r')
+  data=p.chat(messages=[{'role':'user','content':'fixture'}],permit=permit,request_id='r')
+  self.assertEqual(data.message.content,'hi');payload=json.loads(transport.call_args.args[0].data);self.assertEqual(payload['model'],'deepseek-flash')
+  self.assertEqual(permit.reserved,[payload]);self.assertEqual(permit.records[0],'sent');self.assertEqual(permit.records[-1],'completed')
+  with self.assertRaises(ValueError):p.chat(messages=[{'role':'tool','tool_name':'find_files','content':'{}'}],permit=MockPermit('x'),request_id='x')
+ def test_stream_requests_are_refused_before_transport(self):
+  # Cloud streaming is closed by design (complete answers only); replaces the former stream-fragment tests.
+  transport=Mock();p=model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=transport);permit=MockPermit('s')
+  with self.assertRaises(model_providers.CloudError):p.chat(messages=[],stream=True,permit=permit,request_id='s')
+  transport.assert_not_called();self.assertEqual(permit.reserved,[])
  def test_mock_error_no_auto_fallback(self):
-  p=model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=Mock(side_effect=OSError('mock offline')))
-  with self.assertRaises(OSError):p.chat(messages=[])
+  transport=Mock(side_effect=OSError('mock offline'))
+  p=model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=transport);permit=MockPermit('e')
+  with self.assertRaises(model_providers.CloudError):p.chat(messages=[],permit=permit,request_id='e')
+  self.assertEqual(transport.call_count,1);self.assertEqual(permit.records[-1],'failed')  # recorded, never retried
  def test_default_ollama_no_cloud_constructor(self):
   with patch.dict('os.environ',{},clear=True),patch.object(model_providers,'DeepSeekProvider',side_effect=AssertionError('no cloud')):
    self.assertIsInstance(model_providers.configured_provider(),model_providers.OllamaProvider)
-
- def test_mock_stream_assembles_tool_call_fragments(self):
-  chunks=[{'choices':[{'delta':{'tool_calls':[{'index':0,'id':'tool-1','function':{'name':'find_files','arguments':'{"key'}}]}}]},
-          {'choices':[{'delta':{'tool_calls':[{'index':0,'function':{'arguments':'word":"4418"}'}}]},'finish_reason':'tool_calls'}]}]
-  response=io.BytesIO((''.join('data: '+json.dumps(x)+'\n\n' for x in chunks)+'data: [DONE]\n').encode())
-  provider=model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=Mock(return_value=response))
-  events=list(provider.chat(messages=[],stream=True));last=events[-1]['message']
-  self.assertEqual(last.role,'assistant');self.assertEqual(last.tool_calls[0].function.arguments,{'keyword':'4418'})
- def test_mock_stream_error_and_pre_cancel(self):
+ def test_pre_cancel_never_sends(self):
   cancel=threading.Event();cancel.set();transport=Mock()
-  p=model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=transport)
-  with self.assertRaises(model_providers.ProviderCancelled):p.chat(messages=[],cancel=cancel)
-  transport.assert_not_called()
-  p.transport=Mock(return_value=io.BytesIO(b'data: {"error":{"message":"mock failure"}}\n'))
-  with self.assertRaises(RuntimeError):list(p.chat(messages=[],stream=True))
+  p=model_providers.DeepSeekProvider(enabled=True,api_key='mock-only',transport=transport);permit=MockPermit('c')
+  with self.assertRaises(model_providers.ProviderCancelled):p.chat(messages=[],cancel=cancel,permit=permit,request_id='c')
+  transport.assert_not_called();self.assertEqual(permit.reserved,[])

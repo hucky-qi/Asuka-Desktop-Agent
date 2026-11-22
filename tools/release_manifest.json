@@ -729,6 +729,18 @@
     {
       "path": "tests/http/json_memory_repair.py",
       "origin": "source"
+    },
+    {
+      "path": "tests/unit/test_security_hardening.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/unit/_local_fakes.py",
+      "origin": "source"
+    },
+    {
+      "path": "tests/run_all_isolated.py",
+      "origin": "source"
     }
   ]
 }

@@ -1,17 +1,18 @@
-import unittest,threading
+import unittest,threading,tempfile
+from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest.mock import patch
-import backend.assistant.bubble_chat as b
+import backend.assistant.bubble_chat as b, backend.memory.bubble_memory as m
+from tests.unit._local_fakes import LocalProvider, choose_local_qwen
 
-class Provider:
- def __init__(self):self.calls=[]
- def chat(self,**kwargs):
-  self.calls.append(kwargs)
-  yield NS(message=NS(content='回答'))
-  yield NS(message=NS(content='完成'))
+def Provider():return LocalProvider('回答','完成')
 
 class BubbleTests(unittest.TestCase):
- def setUp(self):b.SESSIONS.clear();b.PENDING_CANCEL.clear()
+ def setUp(self):
+  b.SESSIONS.clear();b.PENDING_CANCEL.clear();choose_local_qwen(self)
+  # Never read the real long-term memory into test prompts.
+  folder=tempfile.TemporaryDirectory();self.addCleanup(folder.cleanup)
+  memory=patch.object(m,'PATH',Path(folder.name)/'memory.json');memory.start();self.addCleanup(memory.stop)
  def job(self,sid=None,rid='r'):return b.prepare({'question':'你好','session_id':sid,'request_id':rid})
  def test_local_only_no_tools_bounded_independent_history(self):
   p=Provider();sid=None
@@ -48,6 +49,7 @@ class BubbleTests(unittest.TestCase):
   b.generate(self.job(job[0],'next'),events.append,Broken());self.assertEqual(events[-1]['state'],'idle')
  def test_reset_and_later_request_start_empty(self):
   job=self.job();p=Provider();b.generate(job,lambda e:None,p);b.stop(job[0],reset=True)
-  b.generate(self.job(job[0],'next'),lambda e:None,p);self.assertEqual(len(p.calls[-1]['messages']),2)
+  b.generate(self.job(job[0],'next'),lambda e:None,p)
+  self.assertEqual([x['role'] for x in p.calls[-1]['messages'] if x['role']!='system'],['user'])  # no prior turns after reset
   recovered=b.stop('expired-after-backend-restart',reset=True)
   self.assertEqual(b.SESSIONS[recovered].history,[])
