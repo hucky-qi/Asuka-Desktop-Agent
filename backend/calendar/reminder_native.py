@@ -2,11 +2,15 @@
 import json,os,time,uuid,threading,fcntl
 from pathlib import Path
 import backend.settings as settings
+def _check(ok):
+    """Explicit integrity/identity check that, unlike assert, survives python -O."""
+    if not ok:raise AssertionError
+
 ROOT=settings.PROJECT/'.runtime/reminder-ipc'
 def request(action,data=None,timeout=4):
  ready=ROOT/'ready.json'
  try:
-  r=json.loads(ready.read_text());assert r['bundle']=='local.filechat.asuka.launcher' and r['protocol']==1 and time.time()-ready.stat().st_mtime<5;os.kill(r['pid'],0)
+  r=json.loads(ready.read_text());_check(r['bundle']=='local.filechat.asuka.launcher' and r['protocol']==1 and time.time()-ready.stat().st_mtime<5);os.kill(r['pid'],0)
  except (OSError,ValueError,KeyError,AssertionError):return {'status':'unavailable','message':'原入口原生通知桥接未就绪，未请求权限或投递。'}
  ident=uuid.uuid4().hex;path=ROOT/(ident+'.request.json');result=ROOT/(ident+'.response.json');tmp=path.with_suffix('.tmp');payload={'id':ident,'at':time.time(),'action':action,**(data or {})}
  fd=os.open(tmp,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
@@ -23,7 +27,7 @@ def request(action,data=None,timeout=4):
  try:
   while time.monotonic()<deadline:
    if result.exists():
-    d=json.loads(result.read_text());assert d['id']==ident;return d
+    d=json.loads(result.read_text());_check(d['id']==ident);return d
    threading.Event().wait(.05)
   return {'status':'unknown' if action in ('send','test') else 'unavailable','message':'原生投递回执未确认，不自动重发。'}
  finally:path.unlink(missing_ok=True);result.unlink(missing_ok=True);tmp.unlink(missing_ok=True)

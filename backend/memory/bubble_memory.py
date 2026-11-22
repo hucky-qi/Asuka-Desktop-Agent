@@ -4,6 +4,10 @@ from pathlib import Path
 from contextlib import contextmanager
 from datetime import datetime,timezone
 import backend.settings as settings
+def _check(ok):
+    """Explicit integrity/identity check that, unlike assert, survives python -O."""
+    if not ok:raise AssertionError
+
 PATH=settings.PROJECT/'.bubble-memory.json';LOCK=threading.RLock();LIMIT=330;RECORD_LIMIT=300;LEGACY_LIMIT=30
 SCOPES=frozenset({'chat','files','calendar','shared'})
 def _now():return datetime.now(timezone.utc).isoformat()
@@ -82,7 +86,7 @@ def _decode(raw):
 def _guard():
  raw=_bytes(_side('guard'))
  if raw is None:return None
- try:g=json.loads(raw);assert g['version']==1 and isinstance(g['sha256'],str) and type(g['revision']) is int and g['revision']>=0
+ try:g=json.loads(raw);_check(g['version']==1 and isinstance(g['sha256'],str) and type(g['revision']) is int and g['revision']>=0)
  except Exception:raise ValueError('记忆保护记录损坏；请保留文件，未自动恢复旧备份。') from None
  return g
 def _read():
@@ -120,7 +124,7 @@ def _recovery_status():
  guard=_guard();pendingraw=_bytes(_side('pending'));raw=_bytes(PATH)
  if pendingraw is not None:
   try:
-   p=json.loads(pendingraw);assert p['version']==1;new=_encode(p['data']);_decode(new);assert _sha(new)==p['next_guard']['sha256'];assert _sha(raw) in (p['previous_sha256'],p['next_guard']['sha256']);assert guard in (p['previous_guard'],p['next_guard']);assert p['next_guard']['revision']==p['data']['revision']
+   p=json.loads(pendingraw);_check(p['version']==1);new=_encode(p['data']);_decode(new);_check(_sha(new)==p['next_guard']['sha256']);_check(_sha(raw) in (p['previous_sha256'],p['next_guard']['sha256']));_check(guard in (p['previous_guard'],p['next_guard']));_check(p['next_guard']['revision']==p['data']['revision'])
   except Exception:raise ValueError('未完成事务或关联文件不一致；需保留原文件人工核对，未自动恢复。') from None
   return {'recoverable':True,'kind':'pending','recovery_id':_sha(pendingraw),'message':'存在未完成写入；确认恢复将完成这次提交，不再次执行模型或工具。'}
  if guard and _sha(raw)!=guard['sha256']:

@@ -772,11 +772,34 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         """, baseURL: url)
     }
 
+    /// Native mirror of backend safe_url: only public http(s) sites leave the app for the browser.
+    static func isPublicWebURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              url.user == nil, url.password == nil,
+              let host = url.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]")),
+              !host.isEmpty else { return false }
+        if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") || host == "localhost.localdomain" { return false }
+        if host.contains(":") { return false } // IPv6 literal: loopback/link-local/ULA risk; sources use names
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        if parts.count == 4, parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) {
+            let n = parts.compactMap { Int($0) }
+            guard n.count == 4, n.allSatisfy({ (0...255).contains($0) }) else { return false }
+            if n[0] == 0 || n[0] == 10 || n[0] == 127 || n[0] >= 224 { return false }
+            if n[0] == 169 && n[1] == 254 { return false }
+            if n[0] == 172 && (16...31).contains(n[1]) { return false }
+            if n[0] == 192 && n[1] == 168 { return false }
+            if n[0] == 100 && (64...127).contains(n[1]) { return false }
+            return true
+        }
+        if host.allSatisfy({ $0.isNumber }) { return false } // integer-form IPv4 such as 2130706433
+        return host.contains(".")
+    }
+
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = navigationAction.request.url,
            (url.host == "127.0.0.1" && url.port == chatURL?.port) ||
-           (bubbleMode && navigationAction.navigationType == .linkActivated && ["https", "http"].contains(url.scheme ?? "") && url.host != "127.0.0.1") {
+           (bubbleMode && navigationAction.navigationType == .linkActivated && PetDelegate.isPublicWebURL(url)) {
             NSWorkspace.shared.open(url)
         }
         return nil
@@ -790,7 +813,7 @@ final class PetDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             return
         }
         if bubbleMode, navigationAction.navigationType == .linkActivated, let url,
-           ["https", "http"].contains(url.scheme ?? ""), url.host != "127.0.0.1" {
+           PetDelegate.isPublicWebURL(url) {
             NSWorkspace.shared.open(url); decisionHandler(.cancel); return
         }
         decisionHandler(url?.absoluteString == "about:blank" ||

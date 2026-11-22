@@ -45,6 +45,23 @@ def ocr_text(path, page=None):
     return result.stdout.strip()[:180_000]
 
 
+MAX_DOCX_UNCOMPRESSED = 200 * 1024 * 1024
+MAX_DOCX_ENTRIES = 5000
+
+
+class DocxTooLarge(ValueError):
+    pass
+
+
+def check_docx_archive(file):
+    """Reject zip bombs before python-docx inflates every part into memory."""
+    from zipfile import ZipFile
+    with ZipFile(file) as archive:
+        entries = archive.infolist()
+    if len(entries) > MAX_DOCX_ENTRIES or sum(item.file_size for item in entries) > MAX_DOCX_UNCOMPRESSED:
+        raise DocxTooLarge("DOCX 解压后过大，已跳过读取")
+
+
 def extract_sections(path, allow_ocr=True):
     """Return (page number or None, text) while preserving PDF references."""
     file = checked_file(path)
@@ -96,11 +113,14 @@ def extract_sections(path, allow_ocr=True):
         except ImportError as exc:
             raise RuntimeError("请先安装 requirements.txt 中的 python-docx") from exc
         try:
+            check_docx_archive(file)
             document = Document(file)
             paragraphs = [p.text for p in document.paragraphs]
             for table in document.tables:
                 paragraphs.extend(" | ".join(cell.text for cell in row.cells) for row in table.rows)
             return [(None, "\n".join(paragraphs)[:180_000])]
+        except DocxTooLarge:
+            raise
         except (BadZipFile, PackageNotFoundError, KeyError, OSError, ValueError) as exc:
             raise ValueError("DOCX 文件已损坏或格式不正确") from exc
     raw = file.read_bytes()

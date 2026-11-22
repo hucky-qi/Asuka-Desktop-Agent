@@ -10,6 +10,14 @@ import UserNotifications
 import Speech
 import AVFoundation
 
+/// Same rule as backend/settings.py: LOCAL_FILE_CHAT_PORT (1-65535) or 8765.
+let backendPort:Int={
+    guard let raw=ProcessInfo.processInfo.environment["LOCAL_FILE_CHAT_PORT"] else{return 8765}
+    guard let value=Int(raw),(1...65535).contains(value) else{return 8765}
+    return value
+}()
+func isHexID(_ text:String,_ count:Int)->Bool{text.count==count && text.unicodeScalars.allSatisfy{"0123456789abcdefABCDEF".unicodeScalars.contains($0)}}
+
 
 // CALENDAR_RANGE_BEGIN
 struct CalendarRange {
@@ -382,8 +390,8 @@ final class ReminderNotificationBridge:NSObject,UNUserNotificationCenterDelegate
     @objc func calendarPermission(){calendarAccess?()}
     @objc func recoverStartup(){startupRecovery?()}
     @objc func openTest(){
-        guard let raw=try? Data(contentsOf:root.appendingPathComponent("test-capability.json")),let d=(try? JSONSerialization.jsonObject(with:raw)) as? [String:Any],let token=d["token"] as? String,
-              let url=URL(string:"http://127.0.0.1:8765/reminder-notifications#"+token) else{return}
+        guard let raw=try? Data(contentsOf:root.appendingPathComponent("test-capability.json")),let d=(try? JSONSerialization.jsonObject(with:raw)) as? [String:Any],let token=d["token"] as? String,isHexID(token,64),
+              let url=URL(string:"http://127.0.0.1:\(backendPort)/reminder-notifications#"+token) else{return}
         NSWorkspace.shared.open(url)
     }
     func save(_ d:[String:Any],_ url:URL) {
@@ -478,7 +486,7 @@ final class ReminderNotificationBridge:NSObject,UNUserNotificationCenterDelegate
             save(["delivery_id":delivery,"status":"user_viewed_test"],root.appendingPathComponent(delivery+".click.json"))
             // Legacy isolated notification records viewing only; no separate window.
         }
-        if let id=info["reminder_id"] as? String,let v=info["version"] as? Int,let delivery=info["delivery_id"] as? String,id.count==64,delivery.count==32 {
+        if let id=info["reminder_id"] as? String,let v=info["version"] as? Int,let delivery=info["delivery_id"] as? String,isHexID(id,64),isHexID(delivery,32) {
             let r:[String:Any]=["id":id,"version":v,"delivery_id":delivery,"synthetic":info["synthetic"] as? Bool ?? false]
             if current(r){save(r,root.appendingPathComponent(delivery+".click.json"))
                 DispatchQueue.main.async {self.notificationFocus=delivery+":"+UUID().uuidString;self.refreshReminderBubble()}
@@ -638,7 +646,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let descriptor=open(root.appendingPathComponent(".desktop-pet.lock").path,O_RDWR)
         guard descriptor>=0 else{return false};defer{close(descriptor)}
         if flock(descriptor,LOCK_EX|LOCK_NB)==0{flock(descriptor,LOCK_UN);return false}
-        guard errno==EWOULDBLOCK,let url=URL(string:"http://127.0.0.1:8765/api/health") else{return false}
+        guard errno==EWOULDBLOCK,let url=URL(string:"http://127.0.0.1:\(backendPort)/api/health") else{return false}
         var valid=false;let done=DispatchSemaphore(value:0)
         var request=URLRequest(url:url);request.timeoutInterval=2
         let task=URLSession.shared.dataTask(with:request){data,_,_ in

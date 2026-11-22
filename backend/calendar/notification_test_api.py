@@ -2,16 +2,20 @@
 import json,os,time,secrets,fcntl,hashlib
 from pathlib import Path
 import backend.settings as settings, backend.calendar.reminder_native as reminder_native
+def _check(ok):
+    """Explicit integrity/identity check that, unlike assert, survives python -O."""
+    if not ok:raise AssertionError
+
 ROOT=settings.PROJECT/'.runtime/reminder-ipc'
 class Refused(ValueError):pass
 class Limited(ValueError):pass
 def handle(body,cap):
  try:
   ready=json.loads((ROOT/'ready.json').read_text());control=json.loads((ROOT/'test-capability.json').read_text())
-  assert ready['bundle']=='local.filechat.asuka.launcher' and ready['protocol']==1 and ready['pid']==control['pid']
-  assert time.time()-(ROOT/'ready.json').stat().st_mtime<5
+  _check(ready['bundle']=='local.filechat.asuka.launcher' and ready['protocol']==1 and ready['pid']==control['pid'])
+  _check(time.time()-(ROOT/'ready.json').stat().st_mtime<5)
   os.kill(ready['pid'],0)
-  assert isinstance(cap,str) and len(cap)==64 and secrets.compare_digest(control['token'],cap)
+  _check(isinstance(cap,str) and len(cap)==64 and secrets.compare_digest(control['token'],cap))
  except (OSError,ValueError,KeyError,AssertionError,TypeError):raise Refused('请从原明日香应用的“测试提醒”菜单打开此页；没有请求权限或发送通知。') from None
  action=body.get('action')
  if action=='status':return reminder_native.status()

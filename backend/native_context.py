@@ -3,6 +3,10 @@ import json,os,re,time,uuid,subprocess,datetime,fcntl
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import backend.settings as settings, backend.calendar.calendar_dates as calendar_dates
+def _check(ok):
+    """Explicit integrity/identity check that, unlike assert, survives python -O."""
+    if not ok:raise AssertionError
+
 IPC=settings.PROJECT/'.runtime/calendar-ipc'
 CANDIDATE=re.compile(r'几点|星期|几号|日期|日历|日程|安排|今天|明天|后天|今晚|今早|本周|这周|下周|星期|本月|下月|下个月|\d{4}-\d{2}-\d{2}|改|延后|推迟|提前|挪|调整|reschedule|shift|what time|calendar|schedule|agenda|[0-9一二三四五六七八九十]+点',re.I)
 
@@ -77,7 +81,7 @@ def bridge_request(payload,cancel,timeout=20):
             if cancel.is_set():raise InterruptedError('已取消本机日历读取')
             if response.exists():
                 if response.stat().st_size>8000000:raise ValueError('日历响应过大，未读取')
-                result=json.loads(response.read_text());assert result.get('id')==rid
+                result=json.loads(response.read_text());_check(result.get('id')==rid)
                 return result
             cancel.wait(.1)
         return {'status':'timeout','message':'本机日历读取超时；若出现系统授权窗口，请完成授权后再试'}

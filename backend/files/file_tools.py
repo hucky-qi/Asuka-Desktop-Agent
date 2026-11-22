@@ -389,9 +389,36 @@ def find_files(keyword="", scope="all", extensions=None, modified_after=None,
                                   "部分目录不存在" if coverage.get("missing_roots") else "")}
 
 
+# `open` hands these to Terminal, Installer, a script runner or another launcher,
+# which would execute content from a searched folder (e.g. Downloads). Finder reveal stays.
+LAUNCHER_SUFFIXES = {
+    ".command", ".tool", ".terminal", ".sh", ".bash", ".zsh", ".csh", ".ksh", ".fish",
+    ".app", ".pkg", ".mpkg", ".jar", ".workflow", ".action", ".scpt", ".scptd",
+    ".applescript", ".osax", ".fileloc", ".webloc", ".inetloc", ".url", ".shortcut",
+    ".mobileconfig", ".configprofile", ".prefpane", ".saver", ".plugin", ".kext",
+    ".bundle", ".dylib", ".so", ".exe", ".bat", ".cmd", ".ps1", ".vbs", ".msi", ".py", ".pyw",
+}
+EXECUTABLE_MAGIC = (b"#!", b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf",
+                    b"\xfe\xed\xfa\xce", b"\xca\xfe\xba\xbe")
+
+
+def refuse_launcher(file):
+    if file.suffix.lower() in LAUNCHER_SUFFIXES:
+        raise ValueError("出于安全考虑，不直接打开可执行或启动类文件；可改用“在 Finder 中显示”。")
+    if os.access(file, os.X_OK):
+        try:
+            with file.open("rb") as handle:
+                head = handle.read(4)
+        except OSError as exc:
+            raise ValueError("无法确认文件类型，未打开") from exc
+        if head.startswith(EXECUTABLE_MAGIC):
+            raise ValueError("出于安全考虑，不直接打开可执行程序或脚本；可改用“在 Finder 中显示”。")
+
+
 def open_file(path):
-    """Open a validated file in the macOS default app."""
+    """Open a validated, non-executable file in the macOS default app."""
     file = checked_file(path)
+    refuse_launcher(file)
     if sys.platform != "darwin":
         raise RuntimeError("打开文件目前只支持 macOS")
     subprocess.run(["open", str(file)], check=True, timeout=15)

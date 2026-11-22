@@ -39,6 +39,10 @@ class LocalAssistantTests(unittest.TestCase):
         database = patch.object(settings, "SEMANTIC_DB", self.root / "semantic-test.sqlite3")
         database.start()
         self.addCleanup(database.stop)
+        # Saved searches/scopes must never reach the real .assistant_preferences.json.
+        prefs = patch.object(settings, "PREFERENCES_PATH", self.root / "preferences-test.json")
+        prefs.start()
+        self.addCleanup(prefs.stop)
         self.workspace = self.root / "workspace"
         self.desktop = self.root / "Desktop"
         self.downloads = self.root / "Downloads"
@@ -61,6 +65,14 @@ class LocalAssistantTests(unittest.TestCase):
             folder = self.workspace / name
             folder.mkdir()
             (folder / "COMP4418_hidden.pdf").write_text("hidden")
+
+    @staticmethod
+    def qwen_web_session():
+        """The legacy /api/chat file route only serves a web session that chose local Qwen."""
+        import backend.assistant.unified_web as unified_web
+        key, _, conversation = unified_web.resolve(None)
+        conversation.selected_provider = "ollama"  # what /api/assistant/model select=ollama sets
+        return key
 
     def test_search_quality_scopes_metadata(self):
         data = file_tools.find_files("4418", scope="workspace")
@@ -191,7 +203,11 @@ class LocalAssistantTests(unittest.TestCase):
 
         with patch.object(app, "chat", side_effect=model), patch.object(file_tools.sys, "platform", "darwin"), patch.object(file_tools.subprocess, "run"):
             self.assertIn("本地文件助手", urllib.request.urlopen(url).read().decode())
-            response = post("/api/chat", {"question": "找 4418"})
+            with self.assertRaises(urllib.error.HTTPError) as refused:
+                post("/api/chat", {"question": "找 4418"})  # default DeepSeek/unified page never uses it
+            self.assertEqual(refused.exception.code, 400)
+            self.assertEqual(calls, 0)
+            response = post("/api/chat", {"question": "找 4418", "session_id": self.qwen_web_session()})
             self.assertTrue(response["events"][0]["results"])
             path = response["events"][0]["results"][0]["path"]
             self.assertEqual(post("/api/action", {"session_id": response["session_id"], "action": "open_file", "path": path})["file"]["path"], path)
@@ -690,21 +706,28 @@ class LocalAssistantTests(unittest.TestCase):
         def first():
             try:
                 responses.append(post("/api/chat", {"question": "第一次", "scope": "workspace",
-                                                    "request_id": "cancel-test"}))
+                                                    "session_id": web_session, "request_id": "cancel-test"}))
             finally:
                 first_done.set()
 
+        web_session = self.qwen_web_session()
         with patch.object(app, "chat", side_effect=model):
             thread = threading.Thread(target=first, daemon=True)
             thread.start()
             try:
                 self.assertTrue(entered.wait(2))
                 new_session = post("/api/chat/cancel", {"request_id": "cancel-test"})["session_id"]
-                self.assertNotIn(new_session, (None, ""))
+                self.assertNotIn(new_session, (None, "", web_session))
+                # The forked file session is not a Qwen web session, so the gated route refuses it.
+                with self.assertRaises(urllib.error.HTTPError) as refused:
+                    post("/api/chat", {"question": "下一项任务", "scope": "workspace",
+                                       "session_id": new_session, "request_id": "forked-test"})
+                self.assertEqual(refused.exception.code, 400)
+                # The page's own Qwen session is not blocked by the cancelled request.
                 following = post("/api/chat", {"question": "下一项任务", "scope": "workspace",
-                                               "session_id": new_session, "request_id": "next-test"})
+                                               "session_id": web_session, "request_id": "next-test"})
                 self.assertEqual(following["answer"], "完成")
-                self.assertEqual(following["session_id"], new_session)
+                self.assertTrue(following["session_id"])
             finally:
                 release.set()
                 self.assertTrue(first_done.wait(3))
@@ -747,7 +770,7 @@ class LocalAssistantTests(unittest.TestCase):
                 return SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=[]))
 
             with patch.object(app, "chat", side_effect=model):
-                response = post("/api/chat", {"question": "找4418"})
+                response = post("/api/chat", {"question": "找4418", "session_id": self.qwen_web_session()})
             session = response["session_id"]
             path = response["events"][0]["results"][0]["path"]
             preview = post("/api/preview", {"session_id": session, "path": path})
@@ -765,12 +788,30 @@ class LocalAssistantTests(unittest.TestCase):
                 post("/api/preferences", {"operation": "add_scope", "name": "outside", "path": str(self.root)})
 
     def test_auto_index_only_when_enabled(self):
-        with patch.object(preferences, "load", side_effect=[{"auto_index": False}, {"auto_index": True}]), \
+        import backend.memory.periodic_distillation as distillation
+        interval = settings.AUTO_INDEX_INTERVAL
+        clock = iter(range(0, 100 * interval, interval))  # each reading advances one interval
+        with patch.object(distillation, "tick") as tick, \
+             patch.object(app.time, "monotonic", side_effect=lambda: next(clock)), \
+             patch.object(preferences, "load", side_effect=[{"auto_index": False}, {"auto_index": True}]), \
              patch.object(app.time, "sleep", side_effect=[None, None, StopIteration]), \
              patch.object(app, "start_index") as start:
             with self.assertRaises(StopIteration):
                 app.automatic_index_loop()
-            start.assert_called_once_with("all")
+            start.assert_called_once_with("all")  # first due round disabled, second enabled
+            self.assertEqual(tick.call_count, 2)
+
+    def test_auto_index_waits_for_interval(self):
+        import backend.memory.periodic_distillation as distillation
+        with patch.object(distillation, "tick"), \
+             patch.object(app.time, "monotonic", return_value=0), \
+             patch.object(preferences, "load", return_value={"auto_index": True}) as load, \
+             patch.object(app.time, "sleep", side_effect=[None, None, StopIteration]), \
+             patch.object(app, "start_index") as start:
+            with self.assertRaises(StopIteration):
+                app.automatic_index_loop()
+            start.assert_not_called()  # never indexes at startup or before the interval
+            load.assert_not_called()
 
 
 if __name__ == "__main__":

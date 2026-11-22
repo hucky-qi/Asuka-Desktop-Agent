@@ -63,9 +63,9 @@ def handle(handler,body):
      key='web-'+uuid.uuid4().hex;SESSIONS.pop(old,None);SESSIONS[key]=sid;assistant_files.BACKEND['sessions'][key]=assistant_files.BACKEND['session']()
    else:
     key,sid,c=resolve(None);c.recovery_parent=body.get('session_id')
-    if body.get('resume_hint',{}).get('requires_grant') is True:c.recovery_requires_grant=True
-    if body.get('resume_hint',{}).get('provider')=='ollama':c.selected_provider='ollama'
-    c.daily_data_controls={k:False for k,v in body.get('resume_hint',{}).get('controls',{}).items() if k in ('history','memory','file_intent','calendar_intent') and v is False}
+    if (body.get('resume_hint') or {}).get('requires_grant') is True:c.recovery_requires_grant=True
+    if (body.get('resume_hint') or {}).get('provider')=='ollama':c.selected_provider='ollama'
+    c.daily_data_controls={k:False for k,v in (body.get('resume_hint') or {}).get('controls',{}).items() if k in ('history','memory','file_intent','calendar_intent') and v is False}
     recovery_note={'kind':'fresh' if old else 'new','message':'已连接新网页对话；旧任务和上下文未恢复。' if old else ''}
  else:key,sid,c=resolve(body.get('session_id'))
  c.public_session_id=key

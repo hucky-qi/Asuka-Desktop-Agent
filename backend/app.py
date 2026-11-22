@@ -119,7 +119,29 @@ def fork_session(state):
                    display_limit=state.display_limit)
 
 
+MAX_SESSIONS = 100
+MAX_PENDING_CANCELS = 100
+
+
+def add_session(state):
+    """Insert a fresh session under the same cap as session_for (caller holds SESSIONS_LOCK)."""
+    while len(SESSIONS) >= MAX_SESSIONS:
+        del SESSIONS[min(SESSIONS, key=lambda item: SESSIONS[item].touched)]
+    key = uuid.uuid4().hex
+    SESSIONS[key] = state
+    return key
+
+
+def remember_cancel(request_id):
+    """Record an early stop; bounded so repeated stops cannot grow memory (caller holds CHAT_JOBS_LOCK)."""
+    CHAT_CANCELLED[request_id] = time.time()
+    while len(CHAT_CANCELLED) > MAX_PENDING_CANCELS:
+        CHAT_CANCELLED.pop(next(iter(CHAT_CANCELLED)))
+
+
 def cancel_chat(request_id, session_id=None):
+    if session_id is not None and (not isinstance(session_id, str) or len(session_id) > 64):
+        raise ValueError("会话标识不正确")
     task_status.finish_request(request_id,"file")
     with CHAT_JOBS_LOCK:
         job = CHAT_JOBS.get(request_id)
@@ -127,15 +149,13 @@ def cancel_chat(request_id, session_id=None):
             # The stop request can arrive before the chat worker registers.
             if session_id is not None and session_id not in SESSIONS:
                 raise ValueError("未知会话")
-            CHAT_CANCELLED[request_id] = time.time()
+            remember_cancel(request_id)
             old = SESSIONS[session_id] if session_id else Session()
         else:
             job["cancel"].set()
             old = job["state"]
         with SESSIONS_LOCK:
-            key = uuid.uuid4().hex
-            SESSIONS[key] = fork_session(old)
-        return key
+            return add_session(fork_session(old))
 
 
 def clear_chat(session_id=None, request_id=None):
@@ -145,22 +165,20 @@ def clear_chat(session_id=None, request_id=None):
     if session_id is not None and session_id not in SESSIONS:
         raise ValueError("未知会话")
     if request_id is not None:
-        task_status.finish_request(request_id,"file")
         if not isinstance(request_id, str) or len(request_id) > 64:
             raise ValueError("任务标识不正确")
+        task_status.finish_request(request_id,"file")
         with CHAT_JOBS_LOCK:
             job = CHAT_JOBS.get(request_id)
             if job:
                 job["cancel"].set()
                 session_id = session_id or job.get("session_id")
             else:
-                CHAT_CANCELLED[request_id] = time.time()
+                remember_cancel(request_id)
     with SESSIONS_LOCK:
         if session_id is not None:
             SESSIONS.pop(session_id, None)
-        key = uuid.uuid4().hex
-        SESSIONS[key] = Session()
-    return key
+        return add_session(Session())
 
 
 def start_index(scope):
@@ -310,7 +328,7 @@ def session_for(key):
             if now - SESSIONS[old].touched > 3600:
                 del SESSIONS[old]
         if key not in SESSIONS:
-            if len(SESSIONS) >= 100:
+            if len(SESSIONS) >= MAX_SESSIONS:
                 del SESSIONS[min(SESSIONS, key=lambda item: SESSIONS[item].touched)]
             key = uuid.uuid4().hex
             SESSIONS[key] = Session()
@@ -830,7 +848,28 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass  # A cancelled browser fetch may have closed its socket.
 
+    QUIET_POLLS = ("/api/tasks/status", "/api/index/status", "/api/duplicates/status", "/api/health", "/api/bubble/config")
+
+    def log_request(self, code="-", size="-"):
+        # The desktop polls task status continuously; logging each 200 grew server.log without bound.
+        if self.command == "GET" and self.path in self.QUIET_POLLS and str(getattr(code, "value", code)).startswith("2"):
+            return
+        super().log_request(code, size)
+
+    def local_host(self):
+        # DNS-rebinding guard: a foreign hostname resolving to 127.0.0.1 is same-origin
+        # for the browser, so every read/write must also prove the loopback Host header.
+        return self.headers.get("Host") == f"{settings.HOST}:{settings.PORT}"
+
+    def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        super().end_headers()
+
     def do_GET(self):
+        if not self.local_host():
+            self.send_json(403, {"error": "请通过本地地址访问页面"})
+            return
         if self.path=="/reminder-notifications":
             raw=(settings.FRONTEND/"reminder-notifications.html").read_bytes();self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Cache-Control","no-store");self.send_header("Referrer-Policy","no-referrer");self.send_header("Content-Security-Policy","default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'");self.send_header("Content-Length",str(len(raw)));self.end_headers();self.wfile.write(raw);return
         if self.path in ("/settings-view.js","/speech-view.js","/persona-view.js","/shared-reminder.js","/daily-settings.js","/unified-web.js","/calendar-view.js","/file-qa-view.js", "/memory-view.js"):
@@ -866,6 +905,7 @@ class Handler(BaseHTTPRequestHandler):
         payload = ((settings.FRONTEND/'bubble.html').read_text() if page_path=='/bubble' else HTML).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
@@ -898,7 +938,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path in ('/api/bubble/reminders','/api/assistant/reminders'):
             origin=self.headers.get('Origin')
-            if origin and origin!=f'http://{settings.HOST}:{settings.PORT}':self.send_json(403,{'error':'仅允许同源本地请求'});return
+            if not self.local_host() or (origin and origin!=f'http://{settings.HOST}:{settings.PORT}'):self.send_json(403,{'error':'仅允许同源本地请求'});return
             try:
                 size=int(self.headers.get('Content-Length','0'))
                 if not 0<size<=8192 or self.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError('提醒请求格式不正确')
@@ -945,6 +985,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "请求格式不正确"})
                 return
             body = json.loads(self.rfile.read(size))
+            if not isinstance(body, dict):
+                raise ValueError("请求格式不正确")
             if self.path=="/api/chat" and not getattr(settings,"LEGACY_WEB_CHAT_ENABLED",False):
                 import backend.assistant.unified_web as unified_web
                 key=body.get('session_id')
